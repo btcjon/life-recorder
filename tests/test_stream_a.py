@@ -980,6 +980,15 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         self.assertIn("save.disabled = true", viewer_mod.JS)
         self.assertIn("No people yet", viewer_mod.JS)
         self.assertNotIn("if (person.id === turn.person_id) option.selected = true", viewer_mod.JS)
+        self.assertIn('Unknown · " + key', viewer_mod.JS)
+        self.assertIn("Possibly ", viewer_mod.JS)
+        self.assertIn(" · Confirmed", viewer_mod.JS)
+        self.assertIn(" · Earlier label", viewer_mod.JS)
+        self.assertIn("Mixed labels", viewer_mod.JS)
+        self.assertIn("Unknown · No speaker turns available", viewer_mod.JS)
+        self.assertIn("aria-expanded", viewer_mod.JS)
+        self.assertIn("One more confirmed voice sample needed for ", viewer_mod.JS)
+        self.assertIn("speakers-label", viewer_mod.JS)
 
 
 if __name__ == "__main__":

@@ -108,6 +108,11 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .meta { color: var(--muted); font-size: 12px; }
 .preview { margin: 4px 0 0; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
+.speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; }
+.speakers-label { color: var(--muted); font-size: 12px; font-weight: 650; margin-right: 4px; }
+.pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
+.pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(36,95,204,.25); }
+.pill[aria-disabled="true"] { cursor: default; opacity: .85; }
 .group > p { margin: 7px 0; padding-left: 12px; border-left: 3px solid #d9dfe8; }
 .identity { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8fafc; }
 .identity label { display: block; margin: 6px 0; }
@@ -163,6 +168,8 @@ JS = r"""
   let view = "recordings";
   let selectedId = null;
   let detailMode = "transcript";
+  let openIdentityKey = null;
+  let focusIdentity = false;
   function authHeaders() {
     return { Authorization: "Bearer " + token };
   }
@@ -230,6 +237,38 @@ JS = r"""
     if (turn.suggested_name) return { label: "Suggested", cls: "suggested" };
     return { label: "Unknown", cls: "unknown" };
   }
+  function groupLabel(group) {
+    const turns = group.turns || [];
+    const key = group.speaker_key || (turns[0] && turns[0].speaker_key) || "S1";
+    if (!turns.length) return { label: "Unknown · No speaker turns available", cls: "unknown", interactive: false };
+    const names = new Set();
+    const classes = new Set();
+    for (const turn of turns) {
+      const state = identityState(turn);
+      classes.add(state.cls);
+      if (turn.person_id) names.add(turn.person_id);
+      else if (turn.suggested_person_id) names.add("suggested:" + turn.suggested_person_id);
+      else names.add(state.cls);
+    }
+    if (classes.size > 1 || names.size > 1) return { label: "Mixed labels", cls: "unknown", interactive: true };
+    const turn = turns[0];
+    const named = turns.find((item) => item.name);
+    if (turn.preserved) return { label: named ? named.name + " · Earlier label" : "Earlier label", cls: "preserved", interactive: true };
+    if (turn.person_id && named) return { label: named.name + " · Confirmed", cls: "confirmed", interactive: true };
+    if (turn.suggested_name) return { label: "Possibly " + turn.suggested_name, cls: "suggested", interactive: true };
+    return { label: "Unknown · " + key, cls: "unknown", interactive: true };
+  }
+  function enrollmentCopy(person) {
+    const samples = Number(person.sample_count || 0);
+    const seconds = Number(person.sample_seconds || 0).toFixed(1);
+    const clips = Number(person.clip_count || 0);
+    const stats = person.name + "'s " + samples + " samples/" + seconds + "s/" + clips + " clips";
+    if (person.enrollment_ready) return "Ready for automatic suggestions · " + stats;
+    const remaining = Math.max(0, 3 - samples);
+    if (remaining === 1) return "One more confirmed voice sample needed for " + stats;
+    if (remaining > 1) return remaining + " more confirmed voice samples needed for " + stats;
+    return ((person.enrollment_reasons || []).map(reasonText).join(". ") || "Still learning this voice") + " · " + stats;
+  }
   function groupTurns(chunk) {
     const groups = [];
     const index = new Map();
@@ -285,7 +324,11 @@ JS = r"""
       row.appendChild(title);
       row.appendChild(peek);
       row.appendChild(audioNote);
-      row.addEventListener("click", () => { selectedId = chunk.id; render(); });
+      row.addEventListener("click", () => {
+        if (selectedId !== chunk.id) openIdentityKey = null;
+        selectedId = chunk.id;
+        render();
+      });
       list.appendChild(row);
     }
     if (!chunks.length) {
@@ -345,11 +388,10 @@ JS = r"""
     scope.textContent = group.preserved
       ? "Earlier confirmed label kept from a previous speaker pass."
       : "Applies to this speaker in this recording only.";
-    const state = identityState(group.turns[0] || {});
+    const state = groupLabel(group);
     const badge = document.createElement("span");
     badge.className = "badge " + state.cls;
-    const currentName = group.turns.find((turn) => turn.name)?.name;
-    badge.textContent = currentName ? (currentName + " · " + state.label) : state.label;
+    badge.textContent = state.label;
     const picker = document.createElement("select");
     picker.setAttribute("aria-label", "Choose a person");
     const blank = document.createElement("option");
@@ -458,13 +500,53 @@ JS = r"""
     modes.appendChild(turnsBtn);
     pane.appendChild(title);
     pane.appendChild(meta);
+    const groups = groupTurns(chunk);
+    const speakers = document.createElement("div");
+    speakers.className = "speakers";
+    speakers.setAttribute("aria-label", "Speakers");
+    const speakersLabel = document.createElement("span");
+    speakersLabel.className = "speakers-label";
+    speakersLabel.textContent = groups.length === 1 ? "Speaker" : "Speakers";
+    speakers.appendChild(speakersLabel);
+    if (!groups.length) {
+      const empty = document.createElement("span");
+      empty.className = "badge unknown pill";
+      empty.textContent = "Unknown · No speaker turns available";
+      empty.setAttribute("aria-disabled", "true");
+      speakers.appendChild(empty);
+    }
+    for (const group of groups) {
+      const info = groupLabel(group);
+      const pill = document.createElement("button");
+      pill.type = "button";
+      pill.className = "badge pill " + info.cls;
+      pill.textContent = info.label;
+      pill.setAttribute("aria-expanded", String(openIdentityKey === group.key));
+      pill.setAttribute("aria-label", "Speaker " + (group.speaker_key || "unknown") + ": " + info.label);
+      pill.addEventListener("click", () => {
+        openIdentityKey = openIdentityKey === group.key ? null : group.key;
+        focusIdentity = !!openIdentityKey;
+        render();
+      });
+      speakers.appendChild(pill);
+    }
+    pane.appendChild(speakers);
+    const openGroup = groups.find((group) => group.key === openIdentityKey);
+    if (openGroup) {
+      const editor = identityEditor(openGroup);
+      pane.appendChild(editor);
+      if (focusIdentity) {
+        const picker = editor.querySelector("select");
+        if (picker) picker.focus();
+        focusIdentity = false;
+      }
+    }
     pane.appendChild(modes);
     if (detailMode === "transcript") {
       const body = document.createElement("p");
       body.textContent = chunk.transcript || "No transcript yet.";
       pane.appendChild(body);
     } else {
-      const groups = groupTurns(chunk);
       if (!groups.length) {
         const none = document.createElement("p");
         none.textContent = "No speaker turns for this recording.";
@@ -474,8 +556,7 @@ JS = r"""
         const card = document.createElement("div");
         card.className = "group";
         const heading = document.createElement("div");
-        const currentName = group.turns.find((turn) => turn.name)?.name;
-        heading.textContent = (currentName || group.speaker_key || "Unknown") + (group.preserved ? " · earlier label" : "");
+        heading.textContent = groupLabel(group).label;
         card.appendChild(heading);
         for (const turn of group.turns) {
           const line = document.createElement("p");
@@ -500,7 +581,6 @@ JS = r"""
           line.append(turn.text ? " — " + turn.text : "");
           card.appendChild(line);
         }
-        card.appendChild(identityEditor(group));
         pane.appendChild(card);
       }
     }
@@ -535,10 +615,7 @@ JS = r"""
       const row = document.createElement("div");
       row.className = "person";
       const label = document.createElement("div");
-      const progress = person.enrollment_ready
-        ? "Ready for automatic suggestions"
-        : (person.enrollment_reasons || []).map(reasonText).join(". ") || "Still learning this voice";
-      label.textContent = person.name + " · " + progress + " · " + Number(person.sample_count || 0) + " samples · " + Number(person.sample_seconds || 0).toFixed(1) + "s across " + Number(person.clip_count || 0) + " recordings";
+      label.textContent = enrollmentCopy(person);
       const rename = document.createElement("input");
       rename.type = "text";
       rename.value = person.name;

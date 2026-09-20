@@ -50,7 +50,7 @@ APP = """<!doctype html>
   <aside id="list"></aside>
   <section id="pane"></section>
 </main>
-<p id="help">Possible event labels are heuristic. TV or podcasts can still match. Deleted audio cannot be played. Speakers not identified.</p>
+<p id="help">Possible event labels are heuristic. TV or podcasts can still match. Audio is retained for seven days by default; Keep protects a clip.</p>
 <script src="/app.js"></script>
 </body>
 </html>
@@ -68,6 +68,8 @@ aside, section { padding: 12px 16px; overflow: auto; }
 .possible { background: #fff2cc; }
 .chunk { margin: 0 0 12px; }
 .meta { color: #555; font-size: 12px; }
+.turn { border-left: 3px solid #cfc8b8; padding-left: 8px; margin: 6px 0; }
+audio { width: min(520px, 100%); display: block; margin: 6px 0; }
 #help { padding: 8px 16px; color: #444; }
 @media (max-width: 720px) { main { grid-template-columns: 1fr; } }
 """
@@ -134,16 +136,51 @@ JS = r"""
       node.className = "chunk";
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = (chunk.started_local || chunk.started) + " · audio deleted";
+      meta.textContent = (chunk.started_local || chunk.started) + (chunk.audio_playable ? " · audio retained" : " · audio unavailable");
       const body = document.createElement("p");
       body.textContent = text;
       node.appendChild(meta);
+      if (chunk.audio_playable) {
+        const audio = document.createElement("audio");
+        audio.controls = true;
+        fetch("/v1/audio/" + chunk.id, {headers: authHeaders()}).then(r => r.blob()).then(blob => {
+          audio.src = URL.createObjectURL(blob);
+        });
+        const keep = document.createElement("button");
+        keep.type = "button"; keep.textContent = chunk.audio_pinned ? "Kept" : "Keep audio";
+        keep.disabled = !!chunk.audio_pinned;
+        keep.addEventListener("click", async () => {
+          const r = await fetch("/v1/chunks/" + chunk.id + "/keep", {method:"POST",headers:authHeaders()});
+          if (r.ok) { keep.textContent = "Kept"; keep.disabled = true; }
+        });
+        node.appendChild(audio); node.appendChild(keep);
+      }
       node.appendChild(body);
+      for (const turn of (chunk.speakers || [])) {
+        const part = document.createElement("div"); part.className = "turn";
+        const speaker = turn.name || (turn.suggested_name ? "Maybe " + turn.suggested_name : turn.speaker_key || "Unknown");
+        part.textContent = speaker + " · " + turn.started.toFixed(1) + "–" + turn.ended.toFixed(1) + "s";
+        if (turn.text) part.append(" — " + turn.text);
+        const label = document.createElement("button"); label.type = "button"; label.textContent = "Label";
+        label.addEventListener("click", async () => {
+          const name = prompt("Speaker name (for example, Jon)"); if (!name) return;
+          let person = (payload.people || []).find(p => p.name.toLowerCase() === name.toLowerCase());
+          if (!person) {
+            const created = await fetch("/v1/people", {method:"POST",headers:{...authHeaders(),"Content-Type":"application/json"},body:JSON.stringify({name})});
+            if (!created.ok) return; person = await created.json(); payload.people.push(person);
+          }
+          const sample = confirm("Use this confirmed turn as a voice sample when it is long enough?");
+          const saved = await fetch("/v1/turns/" + turn.id + "/label", {method:"POST",headers:{...authHeaders(),"Content-Type":"application/json"},body:JSON.stringify({person_id:person.id,use_sample:sample})});
+          if (saved.ok) loadDay();
+        });
+        part.append(" "); part.appendChild(label);
+        node.appendChild(part);
+      }
       pane.appendChild(node);
     }
     const pending = document.createElement("p");
     pending.className = "meta";
-    pending.textContent = "Pending " + (payload.pending || 0) + ", errors " + (payload.errors || 0) + ". Speakers not identified.";
+    pending.textContent = "Pending " + (payload.pending || 0) + ", errors " + (payload.errors || 0) + ". Speaker labels remain anonymous until confirmed.";
     pane.appendChild(pending);
   }
   document.getElementById("refresh").addEventListener("click", loadDay);
@@ -231,6 +268,35 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "Unauthorized"})
         if path == "/v1/days":
             return self._json(200, {"days": self._inbox().viewer_days()})
+        if path.startswith("/v1/audio/"):
+            chunk_id = path.removeprefix("/v1/audio/")
+            row = self._inbox().receipt(chunk_id)
+            if not row or row["status"] != "complete" or row["audio_state"] != "present":
+                return self._json(404, {"error": "Audio unavailable"})
+            audio = Path(row["path"])
+            if not audio.is_file():
+                return self._json(404, {"error": "Audio unavailable"})
+            size = audio.stat().st_size
+            start, end, status = 0, max(0, size - 1), 200
+            range_header = self.headers.get("Range")
+            if range_header:
+                if not range_header.startswith("bytes=") or "," in range_header:
+                    return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
+                try:
+                    left, right = range_header[6:].split("-", 1)
+                    start = int(left) if left else max(0, size - int(right))
+                    end = int(right) if right else size - 1
+                    if start < 0 or end < start or start >= size:
+                        raise ValueError
+                    end = min(end, size - 1); status = 206
+                except (ValueError, TypeError):
+                    return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
+            with audio.open("rb") as handle:
+                handle.seek(start); body = handle.read(end - start + 1)
+            extra = {"Accept-Ranges": "bytes"}
+            if status == 206:
+                extra["Content-Range"] = f"bytes {start}-{end}/{size}"
+            return self._send(status, body, "audio/mp4", extra)
         if path.startswith("/v1/days/"):
             day = path.removeprefix("/v1/days/")
             try:
@@ -238,6 +304,36 @@ class ViewerHandler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._json(400, {"error": "Invalid day"})
             return self._json(200, self._inbox().viewer_day(day))
+        return self._json(404, {"error": "Not found"})
+
+    def do_POST(self):
+        if not self._host_ok() or not self._origin_ok() or not self._authorized():
+            return self._json(401, {"error": "Unauthorized"})
+        path = urlparse(self.path).path
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        body = {}
+        if length:
+            if length > 4096:
+                return self._json(413, {"error": "Request too large"})
+            try:
+                body = json.loads(self.rfile.read(length))
+            except (ValueError, json.JSONDecodeError):
+                return self._json(400, {"error": "Invalid JSON"})
+        if path == "/v1/people":
+            try:
+                return self._json(201, self._inbox().create_person(body.get("name", "")))
+            except ValueError:
+                return self._json(400, {"error": "Invalid name"})
+        if path.startswith("/v1/turns/") and path.endswith("/label"):
+            turn_id = path[len("/v1/turns/"):-len("/label")]
+            if self._inbox().label_turn(turn_id, body.get("person_id", ""), bool(body.get("use_sample"))):
+                return self._json(200, {"labeled": True})
+            return self._json(404, {"error": "Turn or person unavailable"})
+        if path.startswith("/v1/chunks/") and path.endswith("/keep"):
+            chunk_id = path[len("/v1/chunks/"):-len("/keep")]
+            if self._inbox().keep_audio(chunk_id):
+                return self._json(200, {"kept": True})
+            return self._json(404, {"error": "Audio unavailable"})
         return self._json(404, {"error": "Not found"})
 
 

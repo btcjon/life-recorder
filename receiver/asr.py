@@ -108,6 +108,7 @@ def parse_parakeet_output(path: Path) -> tuple[str, dict]:
                 "endTime": _optional_number(item.get("endTime")),
             })
         summary["wordCount"] = len(parsed_words)
+        summary["wordTimings"] = parsed_words[:10000]
     return data["text"], {key: value for key, value in summary.items() if value is not None}
 
 

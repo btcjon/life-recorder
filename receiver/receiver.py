@@ -6,6 +6,7 @@ import argparse
 import hashlib
 import hmac
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -27,10 +28,14 @@ import asr as asr_mod
 import detector as detector_mod
 import meetings as meetings_mod
 import viewer as viewer_mod
+import diarization as diarization_mod
 
 MAX_UPLOAD = 32 * 1024 * 1024
 SESSION_GAP_SECONDS = 15 * 60
 DISPLAY_ZONE = ZoneInfo("America/New_York")
+RETENTION_SECONDS = 7 * 24 * 60 * 60
+MAX_RETENTION_SECONDS = 14 * 24 * 60 * 60
+MAX_RETAINED_BYTES = 2 * 1024 * 1024 * 1024
 
 
 def atomic_write(path: Path, data: bytes):
@@ -143,15 +148,23 @@ class Inbox:
                 row = db.execute("SELECT duration FROM chunks WHERE id=?", (chunk_id,)).fetchone()
                 duration = float(row["duration"]) if row else 0.0
                 density = (word_count / duration) if duration else 0.0
+                now = time.time()
+                summary = provenance.get("summary") or {}
+                words = summary.get("wordTimings") if isinstance(summary, dict) else None
+                path_row = db.execute("SELECT path FROM chunks WHERE id=?", (chunk_id,)).fetchone()
+                audio_bytes = Path(path_row["path"]).stat().st_size if path_row and Path(path_row["path"]).is_file() else 0
                 db.execute(
                     """UPDATE chunks SET status='complete', transcript=?, error=NULL,
-                       engine=?, asr_model=?, asr_summary=?, word_count=?, speech_density=?
+                       engine=?, asr_model=?, asr_summary=?, word_count=?, speech_density=?,
+                       completed_at=?, audio_state='present', audio_bytes=?, audio_expires_at=?,
+                       words_json=?, diarization_status='pending'
                        WHERE id=?""",
                     (cleaned, provenance.get("engine"), provenance.get("model"),
-                     json.dumps(provenance.get("summary") or {}), word_count, density, chunk_id),
+                     json.dumps(summary), word_count, density, now, audio_bytes,
+                     now + RETENTION_SECONDS, json.dumps(words or []), chunk_id),
                 )
             self.export()
-            # Never delete the remote audio until both DB and Markdown are durable.
+            # Keep completed audio for playback and speaker enrichment, within bounded limits.
             self.cleanup_completed()
             try:
                 self.rebuild_derived()
@@ -159,10 +172,44 @@ class Inbox:
                 pass
 
     def cleanup_completed(self):
+        now = time.time()
+        with self.lock, self.connect() as db:
+            rows = db.execute("""SELECT id,path,COALESCE(audio_bytes,0) AS audio_bytes,
+                audio_expires_at,audio_pinned,COALESCE(completed_at,received) AS completed_at
+                FROM chunks WHERE status='complete' AND audio_state='present'
+                ORDER BY COALESCE(completed_at,received),id""").fetchall()
+            for row in rows:
+                path = Path(row["path"])
+                if not path.is_file():
+                    db.execute("UPDATE chunks SET audio_state='deleted',audio_bytes=0 WHERE id=?", (row["id"],))
+                else:
+                    expires = row["audio_expires_at"] or (float(row["completed_at"]) + RETENTION_SECONDS)
+                    db.execute("UPDATE chunks SET audio_bytes=?,audio_expires_at=? WHERE id=?",
+                               (path.stat().st_size, expires, row["id"]))
+            rows = db.execute("""SELECT id,path,COALESCE(audio_bytes,0) AS audio_bytes,
+                audio_expires_at,audio_pinned FROM chunks WHERE status='complete'
+                AND audio_state='present' ORDER BY COALESCE(completed_at,received),id""").fetchall()
+            total = sum(int(row["audio_bytes"] or 0) for row in rows)
+            for row in rows:
+                expired = not row["audio_pinned"] and row["audio_expires_at"] is not None and row["audio_expires_at"] <= now
+                over_cap = not row["audio_pinned"] and total > MAX_RETAINED_BYTES
+                if not (expired or over_cap):
+                    continue
+                path = Path(row["path"])
+                size = int(row["audio_bytes"] or 0)
+                path.unlink(missing_ok=True)
+                db.execute("UPDATE chunks SET audio_state='deleted',audio_bytes=0 WHERE id=?", (row["id"],))
+                total = max(0, total - size)
+
+    def keep_audio(self, chunk_id: str, days: int = 14):
+        days = max(1, min(int(days), 14))
         with self.connect() as db:
-            rows = db.execute("SELECT path FROM chunks WHERE status='complete'").fetchall()
-        for row in rows:
-            Path(row["path"]).unlink(missing_ok=True)
+            row = db.execute("SELECT status,audio_state FROM chunks WHERE id=?", (chunk_id,)).fetchone()
+            if not row or row["status"] != "complete" or row["audio_state"] != "present":
+                return False
+            db.execute("UPDATE chunks SET audio_pinned=1,audio_expires_at=? WHERE id=?",
+                       (time.time() + min(days * 86400, MAX_RETENTION_SECONDS), chunk_id))
+        return True
 
     def export(self):
         with self.lock, self.connect() as db:
@@ -299,6 +346,7 @@ class Inbox:
                 sessions.append({"title": f"Capture session {session_number}", "started": meetings_mod.format_utc(started)})
             previous_end = max(previous_end or 0, finished.timestamp())
             chunks.append({
+                "id": row["id"],
                 "started": meetings_mod.format_utc(started),
                 "started_local": started.astimezone(DISPLAY_ZONE).strftime("%Y-%m-%d %H:%M %Z"),
                 "duration": float(row["duration"]),
@@ -306,8 +354,12 @@ class Inbox:
                 "word_count": row["word_count"],
                 "status": row["status"],
                 "engine": row["engine"],
-                "audio_playable": False,
-                "speakers": None,
+                "audio_playable": row["audio_state"] == "present" and Path(row["path"]).is_file(),
+                "audio_expires_at": row["audio_expires_at"],
+                "audio_pinned": bool(row["audio_pinned"]),
+                "words": json.loads(row["words_json"] or "[]"),
+                "diarization_status": row["diarization_status"],
+                "speakers": self.speaker_turns(row["id"]),
             })
         with self.connect() as db:
             interval_rows = db.execute(
@@ -339,7 +391,110 @@ class Inbox:
             "pending": pending,
             "errors": errors,
             "speakers": None,
+            "people": self.people(),
         }
+
+    def speaker_turns(self, chunk_id: str):
+        with self.connect() as db:
+            chunk = db.execute("SELECT words_json FROM chunks WHERE id=?", (chunk_id,)).fetchone()
+            rows = db.execute("""SELECT t.id,t.speaker_key,t.started,t.ended,t.quality,
+                t.person_id,t.label_source,p.name,t.embedding_json FROM speaker_turns t
+                LEFT JOIN people p ON p.id=t.person_id WHERE t.chunk_id=? ORDER BY t.started""",
+                (chunk_id,)).fetchall()
+        words = json.loads(chunk["words_json"] or "[]") if chunk else []
+        profiles = self.voice_profiles()
+        output = []
+        for row in rows:
+            item = dict(row)
+            embedding = json.loads(item.pop("embedding_json") or "null")
+            selected = []
+            for word in words:
+                try:
+                    start = float(word["startTime"]); end = float(word["endTime"])
+                except (KeyError, TypeError, ValueError):
+                    continue
+                if item["started"] <= (start + end) / 2 <= item["ended"]:
+                    selected.append(str(word.get("word") or ""))
+            item["text"] = " ".join(selected).strip()
+            if not item["person_id"] and isinstance(embedding, list):
+                ranked = sorted(((cosine(embedding, profile["centroid"]), profile)
+                                 for profile in profiles), reverse=True, key=lambda pair: pair[0])
+                if ranked and ranked[0][0] >= 0.85 and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.10):
+                    item["suggested_person_id"] = ranked[0][1]["id"]
+                    item["suggested_name"] = ranked[0][1]["name"]
+                    item["suggestion_score"] = round(ranked[0][0], 3)
+            output.append(item)
+        return output
+
+    def voice_profiles(self):
+        with self.connect() as db:
+            rows = db.execute("""SELECT s.person_id,p.name,s.embedding_json,s.duration,t.chunk_id
+                FROM voice_samples s JOIN people p ON p.id=s.person_id
+                JOIN speaker_turns t ON t.id=s.turn_id ORDER BY s.confirmed_at""").fetchall()
+        grouped = {}
+        for row in rows:
+            embedding = json.loads(row["embedding_json"])
+            if not isinstance(embedding, list) or not embedding:
+                continue
+            entry = grouped.setdefault(row["person_id"], {"id": row["person_id"], "name": row["name"],
+                                                           "vectors": [], "chunks": set(), "seconds": 0.0})
+            entry["vectors"].append(embedding); entry["chunks"].add(row["chunk_id"])
+            entry["seconds"] += float(row["duration"])
+        profiles = []
+        for entry in grouped.values():
+            if len(entry["vectors"]) < 3 or len(entry["chunks"]) < 2 or entry["seconds"] < 20:
+                continue
+            width = min(len(vector) for vector in entry["vectors"])
+            centroid = [sum(vector[i] for vector in entry["vectors"]) / len(entry["vectors"]) for i in range(width)]
+            profiles.append({"id": entry["id"], "name": entry["name"], "centroid": centroid})
+        return profiles
+
+    def people(self):
+        with self.connect() as db:
+            return [dict(row) for row in db.execute("SELECT id,name FROM people ORDER BY name COLLATE NOCASE")]
+
+    def create_person(self, name: str):
+        name = " ".join(str(name).split())[:100]
+        if not name:
+            raise ValueError("Name required")
+        person_id = str(uuid.uuid4())
+        now = time.time()
+        with self.connect() as db:
+            db.execute("INSERT INTO people(id,name,created_at,updated_at) VALUES(?,?,?,?)",
+                       (person_id, name, now, now))
+        return {"id": person_id, "name": name}
+
+    def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
+        with self.connect() as db:
+            person = db.execute("SELECT id FROM people WHERE id=?", (person_id,)).fetchone()
+            turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
+            if not person or not turn:
+                return False
+            db.execute("UPDATE speaker_turns SET person_id=?,label_source='confirmed' WHERE id=?",
+                       (person_id, turn_id))
+            embedding = json.loads(turn["embedding_json"] or "null")
+            duration = float(turn["ended"]) - float(turn["started"])
+            if use_sample and isinstance(embedding, list) and duration >= 3:
+                db.execute("""INSERT INTO voice_samples
+                    (id,person_id,turn_id,embedding_json,duration,confirmed_at) VALUES(?,?,?,?,?,?)
+                    ON CONFLICT(turn_id) DO UPDATE SET person_id=excluded.person_id,
+                    embedding_json=excluded.embedding_json,duration=excluded.duration,
+                    confirmed_at=excluded.confirmed_at""",
+                    (str(uuid.uuid4()), person_id, turn_id, json.dumps(embedding), duration, time.time()))
+        return True
+
+
+def cosine(left, right):
+    if not left or not right:
+        return -1.0
+    width = min(len(left), len(right))
+    try:
+        dot = sum(float(left[i]) * float(right[i]) for i in range(width))
+        a = math.sqrt(sum(float(left[i]) ** 2 for i in range(width)))
+        b = math.sqrt(sum(float(right[i]) ** 2 for i in range(width)))
+    except (TypeError, ValueError, OverflowError):
+        return -1.0
+    return dot / (a * b) if a and b else -1.0
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -547,6 +702,7 @@ def main():
     parser.add_argument("--mlx-model", help="Local MLX model directory; used only with --mlx-command")
     parser.add_argument("--parakeet-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
     parser.add_argument("--parakeet-model-dir", type=Path, default=asr_mod.DEFAULT_PARAKEET_MODEL_DIR)
+    parser.add_argument("--diarization-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
     parser.add_argument("--init", action="store_true", help="Create the inbox, then exit")
     args = parser.parse_args()
     os.umask(0o077)
@@ -589,6 +745,9 @@ def main():
         threading.Thread(target=worker,
                          args=(inbox, stop, args.model, args.whisper, args.ffmpeg,
                                args.mlx_command, args.mlx_model, config), daemon=True).start()
+    if args.ffmpeg and args.diarization_cli.is_file():
+        threading.Thread(target=diarization_mod.worker,
+                         args=(inbox, stop, args.diarization_cli, args.ffmpeg), daemon=True).start()
     viewer_mod.start_viewer(inbox)
     print(f"Receiver listening on {args.host}:{args.port}; local transcripts: {inbox.root / 'life.md'}", flush=True)
     try:

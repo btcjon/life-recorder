@@ -59,7 +59,7 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(Path(row["path"]).read_bytes(), b"test audio")
         self.assertEqual(row["sha256"], receipt["sha256"])
 
-    def test_lost_receipt_retry_is_idempotent_even_after_audio_deletion(self):
+    def test_lost_receipt_retry_is_idempotent_with_retained_audio(self):
         _, _, chunk_id = self.upload()
         self.inbox.complete(chunk_id, "A test sentence.")
         status, receipt, _ = self.upload(chunk_id=chunk_id)
@@ -67,7 +67,8 @@ class ReceiverTests(unittest.TestCase):
         self.assertTrue(receipt["durable"])
         self.assertEqual(self.inbox.status(), {"complete": 1})
         self.assertEqual((self.inbox.root / "life.md").read_text().count("A test sentence."), 1)
-        self.assertEqual(list(self.inbox.audio.iterdir()), [])
+        self.assertEqual(len(list(self.inbox.audio.iterdir())), 1)
+        self.assertEqual(self.inbox.receipt(chunk_id)["audio_state"], "present")
 
     def test_id_collision_rejected(self):
         _, _, chunk_id = self.upload()

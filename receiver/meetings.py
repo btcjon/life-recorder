@@ -10,7 +10,7 @@ SESSION_GAP = timedelta(minutes=15)
 MAX_MEETING = timedelta(hours=4)
 MAX_BODY = 4 * 1024
 MAX_FUTURE = timedelta(minutes=5)
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 
 
 def parse_utc(value: str) -> datetime:
@@ -70,6 +70,17 @@ def migrate_schema(db) -> None:
         db.execute("ALTER TABLE chunks ADD COLUMN word_count INTEGER")
     if "speech_density" not in cols:
         db.execute("ALTER TABLE chunks ADD COLUMN speech_density REAL")
+    additions = {
+        "completed_at": "REAL", "audio_state": "TEXT NOT NULL DEFAULT 'present'",
+        "audio_bytes": "INTEGER", "audio_expires_at": "REAL",
+        "audio_pinned": "INTEGER NOT NULL DEFAULT 0", "words_json": "TEXT",
+        "diarization_status": "TEXT NOT NULL DEFAULT 'pending'",
+        "diarization_error": "TEXT", "diarization_attempts": "INTEGER NOT NULL DEFAULT 0",
+        "diarization_retry_at": "REAL NOT NULL DEFAULT 0",
+    }
+    for name, declaration in additions.items():
+        if name not in cols:
+            db.execute(f"ALTER TABLE chunks ADD COLUMN {name} {declaration}")
     db.execute(
         """CREATE TABLE IF NOT EXISTS meeting_events (
             event_id TEXT PRIMARY KEY,
@@ -84,6 +95,26 @@ def migrate_schema(db) -> None:
     db.execute(
         "CREATE INDEX IF NOT EXISTS meeting_events_device ON meeting_events(device_id, meeting_id, occurred_at)"
     )
+    db.execute("""CREATE TABLE IF NOT EXISTS people (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, created_at REAL NOT NULL, updated_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS speaker_runs (
+        id TEXT PRIMARY KEY, chunk_id TEXT NOT NULL, engine TEXT NOT NULL,
+        status TEXT NOT NULL, speaker_count INTEGER, processing_seconds REAL,
+        error TEXT, created_at REAL NOT NULL,
+        FOREIGN KEY(chunk_id) REFERENCES chunks(id)
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS speaker_turns (
+        id TEXT PRIMARY KEY, run_id TEXT NOT NULL, chunk_id TEXT NOT NULL,
+        speaker_key TEXT NOT NULL, started REAL NOT NULL, ended REAL NOT NULL,
+        quality REAL, embedding_json TEXT, person_id TEXT, label_source TEXT,
+        FOREIGN KEY(person_id) REFERENCES people(id)
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_samples (
+        id TEXT PRIMARY KEY, person_id TEXT NOT NULL, turn_id TEXT NOT NULL UNIQUE,
+        embedding_json TEXT NOT NULL, duration REAL NOT NULL, confirmed_at REAL NOT NULL,
+        FOREIGN KEY(person_id) REFERENCES people(id)
+    )""")
     db.execute(
         """CREATE TABLE IF NOT EXISTS intervals (
             id TEXT PRIMARY KEY,

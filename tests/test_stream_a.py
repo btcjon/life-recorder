@@ -380,7 +380,7 @@ class WorkerRetryTests(unittest.TestCase):
             self.assertEqual(row["status"], "complete")
             self.assertEqual(row["engine"], "parakeet")
             self.assertEqual((inbox.root / "life.md").read_text().count("once only"), 1)
-            self.assertFalse(dest.exists())
+            self.assertTrue(dest.exists())
             reopened = Inbox(Path(scratch))
             self.assertEqual((reopened.root / "life.md").read_text().count("once only"), 1)
 
@@ -405,7 +405,7 @@ class PersistenceAndViewerTests(unittest.TestCase):
             self.assertTrue(dest.exists())
             self.assertEqual(inbox.receipt(chunk_id)["status"], "complete")
 
-    def test_cleanup_after_restart(self):
+    def test_completed_audio_is_retained_after_restart(self):
         with tempfile.TemporaryDirectory() as scratch:
             root = Path(scratch)
             inbox = Inbox(root)
@@ -417,10 +417,10 @@ class PersistenceAndViewerTests(unittest.TestCase):
                     """INSERT INTO chunks (id,sha256,device,started,duration,path,status,transcript,received)
                        VALUES (?,?,?,?,?,?,?,?,?)""",
                     (chunk_id, "c" * 64, str(uuid.uuid4()), "2026-09-10T12:00:00.000Z",
-                     60.0, str(dest), "complete", "done", 0),
+                     60.0, str(dest), "complete", "done", datetime.now(timezone.utc).timestamp()),
                 )
             reopened = Inbox(root)
-            self.assertFalse(dest.exists())
+            self.assertTrue(dest.exists())
             self.assertEqual(reopened.receipt(chunk_id)["status"], "complete")
 
     def test_migration_on_synthetic_copy(self):
@@ -493,6 +493,10 @@ class PersistenceAndViewerTests(unittest.TestCase):
                 status, payload, _ = get("/v1/days/2026-09-10", auth)
                 data = json.loads(payload)
                 self.assertTrue(any("<script>" in (c["transcript"] or "") for c in data["chunks"]))
+                status, audio, headers = get("/v1/audio/" + chunk_id, {**auth, "Range": "bytes=1-3"})
+                self.assertEqual(status, 206)
+                self.assertEqual(audio, b"udi")
+                self.assertEqual(headers.get("Accept-Ranges"), "bytes")
                 status, _, _ = get("/v1/days", {**auth, "Origin": "https://evil.example"})
                 self.assertEqual(status, 403)
                 status, _, _ = get("/v1/days", {**auth, "Host": "example.com"})

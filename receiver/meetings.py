@@ -10,7 +10,7 @@ SESSION_GAP = timedelta(minutes=15)
 MAX_MEETING = timedelta(hours=4)
 MAX_BODY = 4 * 1024
 MAX_FUTURE = timedelta(minutes=5)
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 
 def parse_utc(value: str) -> datetime:
@@ -102,8 +102,18 @@ def migrate_schema(db) -> None:
         id TEXT PRIMARY KEY, chunk_id TEXT NOT NULL, engine TEXT NOT NULL,
         status TEXT NOT NULL, speaker_count INTEGER, processing_seconds REAL,
         error TEXT, created_at REAL NOT NULL,
+        outcome TEXT, speech_seconds REAL, coverage REAL, turn_count INTEGER,
+        embedding_count INTEGER, cluster_count INTEGER, diagnostics_json TEXT,
         FOREIGN KEY(chunk_id) REFERENCES chunks(id)
     )""")
+    run_cols = {row[1] for row in db.execute("PRAGMA table_info(speaker_runs)")}
+    for name, declaration in {
+        "outcome": "TEXT", "speech_seconds": "REAL", "coverage": "REAL",
+        "turn_count": "INTEGER", "embedding_count": "INTEGER",
+        "cluster_count": "INTEGER", "diagnostics_json": "TEXT",
+    }.items():
+        if name not in run_cols:
+            db.execute(f"ALTER TABLE speaker_runs ADD COLUMN {name} {declaration}")
     db.execute("""CREATE TABLE IF NOT EXISTS speaker_turns (
         id TEXT PRIMARY KEY, run_id TEXT NOT NULL, chunk_id TEXT NOT NULL,
         speaker_key TEXT NOT NULL, started REAL NOT NULL, ended REAL NOT NULL,

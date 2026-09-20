@@ -359,6 +359,7 @@ class Inbox:
                 "audio_pinned": bool(row["audio_pinned"]),
                 "words": json.loads(row["words_json"] or "[]"),
                 "diarization_status": row["diarization_status"],
+                "diarization": self.diarization_summary(row["id"]),
                 "speakers": self.speaker_turns(row["id"]),
             })
         with self.connect() as db:
@@ -394,6 +395,35 @@ class Inbox:
             "people": self.people(),
         }
 
+    def diarization_summary(self, chunk_id: str):
+        with self.connect() as db:
+            run = db.execute("""SELECT outcome,speech_seconds,coverage,turn_count,embedding_count,
+                cluster_count,diagnostics_json,speaker_count,status FROM speaker_runs
+                WHERE chunk_id=? ORDER BY created_at DESC LIMIT 1""", (chunk_id,)).fetchone()
+            chunk = db.execute("""SELECT diarization_status,diarization_error,word_count,duration
+                FROM chunks WHERE id=?""", (chunk_id,)).fetchone()
+        if not chunk:
+            return None
+        summary = {
+            "status": chunk["diarization_status"],
+            "error": chunk["diarization_error"],
+            "asr_words": chunk["word_count"] or 0,
+        }
+        if run:
+            summary.update({
+                "outcome": run["outcome"] or chunk["diarization_status"],
+                "speech_seconds": run["speech_seconds"],
+                "coverage": run["coverage"],
+                "turn_count": run["turn_count"],
+                "embedding_count": run["embedding_count"],
+                "cluster_count": run["cluster_count"],
+                "speaker_count": run["speaker_count"],
+            })
+            extra = json.loads(run["diagnostics_json"] or "{}")
+            if isinstance(extra, dict):
+                summary.update({k: extra[k] for k in extra if k not in summary})
+        return summary
+
     def speaker_turns(self, chunk_id: str):
         with self.connect() as db:
             chunk = db.execute("SELECT words_json FROM chunks WHERE id=?", (chunk_id,)).fetchone()
@@ -416,13 +446,29 @@ class Inbox:
                 if item["started"] <= (start + end) / 2 <= item["ended"]:
                     selected.append(str(word.get("word") or ""))
             item["text"] = " ".join(selected).strip()
-            if not item["person_id"] and isinstance(embedding, list):
+            reasons = []
+            if item["person_id"]:
+                reasons.append("confirmed")
+            elif not isinstance(embedding, list):
+                reasons.append("no_embedding")
+            elif not profiles:
+                reasons.append("no_enrolled_voiceprints")
+            else:
                 ranked = sorted(((cosine(embedding, profile["centroid"]), profile)
                                  for profile in profiles), reverse=True, key=lambda pair: pair[0])
-                if ranked and ranked[0][0] >= 0.60 and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.10):
+                score = ranked[0][0]
+                margin = score - ranked[1][0] if len(ranked) > 1 else score
+                item["suggestion_score"] = round(score, 3)
+                item["suggestion_margin"] = round(margin, 3)
+                if score < 0.60:
+                    reasons.append("score_below_0.60")
+                if len(ranked) > 1 and margin < 0.10:
+                    reasons.append("margin_below_0.10")
+                if not reasons:
                     item["suggested_person_id"] = ranked[0][1]["id"]
                     item["suggested_name"] = ranked[0][1]["name"]
-                    item["suggestion_score"] = round(ranked[0][0], 3)
+                    reasons.append("matched")
+            item["suggestion_reasons"] = reasons
             output.append(item)
         return output
 
@@ -461,8 +507,15 @@ class Inbox:
         people = []
         for row in rows:
             item = dict(row)
-            item["enrollment_ready"] = (item["sample_count"] >= 3 and item["clip_count"] >= 2
-                                        and item["sample_seconds"] >= 20)
+            reasons = []
+            if item["sample_count"] < 3:
+                reasons.append("need_3_samples")
+            if item["clip_count"] < 2:
+                reasons.append("need_2_clips")
+            if item["sample_seconds"] < 20:
+                reasons.append("need_20s")
+            item["enrollment_ready"] = not reasons
+            item["enrollment_reasons"] = reasons
             people.append(item)
         return people
 
@@ -493,11 +546,11 @@ class Inbox:
             if not person or not turn:
                 return False
             matching = db.execute("""SELECT * FROM speaker_turns
-                WHERE chunk_id=? AND speaker_key=?""",
-                (turn["chunk_id"], turn["speaker_key"])).fetchall()
+                WHERE chunk_id=? AND run_id=? AND speaker_key=?""",
+                (turn["chunk_id"], turn["run_id"], turn["speaker_key"])).fetchall()
             db.execute("""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
-                WHERE chunk_id=? AND speaker_key=?""",
-                (person_id, turn["chunk_id"], turn["speaker_key"]))
+                WHERE chunk_id=? AND run_id=? AND speaker_key=?""",
+                (person_id, turn["chunk_id"], turn["run_id"], turn["speaker_key"]))
             turn_ids = [candidate["id"] for candidate in matching]
             placeholders = ",".join("?" for _ in turn_ids)
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)

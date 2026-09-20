@@ -149,7 +149,17 @@ JS = r"""
       node.className = "chunk";
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = (chunk.started_local || chunk.started) + (chunk.audio_playable ? " · audio retained" : "");
+      const diar = chunk.diarization || {};
+      const diarBits = [];
+      if (diar.outcome || chunk.diarization_status) diarBits.push(diar.outcome || chunk.diarization_status);
+      if (Number.isFinite(Number(diar.speech_seconds))) diarBits.push(Number(diar.speech_seconds).toFixed(1) + "s speech");
+      if (Number.isFinite(Number(diar.coverage))) diarBits.push(Math.round(Number(diar.coverage) * 100) + "% coverage");
+      if (diar.turn_count != null) diarBits.push(diar.turn_count + " turns");
+      if (diar.embedding_count != null) diarBits.push(diar.embedding_count + " embeddings");
+      if (diar.cluster_count != null) diarBits.push(diar.cluster_count + " clusters");
+      meta.textContent = (chunk.started_local || chunk.started)
+        + (chunk.audio_playable ? " · audio retained" : "")
+        + (diarBits.length ? " · " + diarBits.join(" · ") : "");
       const body = document.createElement("p");
       body.textContent = text;
       node.appendChild(meta);
@@ -172,10 +182,12 @@ JS = r"""
       for (const turn of turns) {
         const part = document.createElement("div"); part.className = "turn";
         const speaker = turn.name || (turn.suggested_name ? "Maybe " + turn.suggested_name : turn.speaker_key || "Unknown");
+        const why = (turn.suggestion_reasons || []).filter(r => r !== "matched" && r !== "confirmed");
         const turnStart = Number.isFinite(Number(turn.started)) ? Number(turn.started).toFixed(1) : "?";
         const turnEnd = Number.isFinite(Number(turn.ended)) ? Number(turn.ended).toFixed(1) : "?";
         part.textContent = speaker + " · " + turnStart + "–" + turnEnd + "s";
         if (turn.text) part.append(" — " + turn.text);
+        if (why.length && !turn.name) part.append(" (" + why.join(", ") + ")");
         const picker = document.createElement("select");
         for (const person of (payload.people || [])) {
           const option = document.createElement("option"); option.value = person.id; option.textContent = person.name;
@@ -212,7 +224,7 @@ JS = r"""
       const row = document.createElement("div"); row.className = "person";
       const label = document.createElement("span");
       label.textContent = person.name + " · " + (person.sample_count || 0) + " samples / " +
-        (person.clip_count || 0) + " clips" + (person.enrollment_ready ? " · ready" : " · learning");
+        (person.clip_count || 0) + " clips" + (person.enrollment_ready ? " · ready" : " · " + ((person.enrollment_reasons || []).join(", ") || "learning"));
       const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "Rename";
       rename.addEventListener("click", async () => {
         const name = prompt("Rename " + person.name, person.name); if (!name || name === person.name) return;

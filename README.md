@@ -8,7 +8,7 @@ The loopback-only Mac viewer supports transcript search, retained-audio playback
 
 - macOS with Xcode and an Apple developer account capable of installing a development build on the iPhone
 - iPhone running a supported iOS version, with Developer Mode enabled for development installation
-- Python 3.10+, `ffmpeg`, `whisper-cli` from whisper.cpp, and a downloaded GGML Whisper model. Optional: a project-local `.transcription-venv` with `mlx-whisper` for an Apple Silicon experiment, not the default receiver.
+- Python 3.10+ and `ffmpeg`, plus at least one supported local transcription engine. Optional speech-event detection uses FluidAudio's Silero VAD command; optional enhanced playback uses the standalone DeepFilterNet `deep-filter` command.
 - A reachable HTTPS path between phone and Mac (same LAN by default; use a private VPN for cellular access)
 
 ## Build and install
@@ -35,6 +35,8 @@ TLS 1.2 or newer, and continue using the app's certificate pin.
 python3 receiver/setup.py \
   --data-dir /absolute/private/runtime \
   --model /absolute/path/to/ggml-small.bin \
+  --vad-cli /absolute/path/to/fluidaudiocli \
+  --enhance-cli /absolute/path/to/deep-filter \
   --install-agent
 ```
 
@@ -48,7 +50,11 @@ The receiver also serves a loopback-only authenticated viewer at `http://127.0.0
 
 Optional remote viewing for `lr.genr8ive.ai` stays bound to `127.0.0.1:8767`. Enable it with `--viewer-remote-host lr.genr8ive.ai` plus Cloudflare Access `--access-team-domain` and `--access-aud` (or `LIFE_RECORDER_ACCESS_TEAM_DOMAIN` / `LIFE_RECORDER_ACCESS_AUD`). The origin then accepts that exact Host, exact `https://lr.genr8ive.ai` Origin on mutations, and a verified `Cf-Access-Jwt-Assertion` RS256 JWT. Local `open-viewer.command` bearer flow is unchanged. Do not publish receiver port 8766. Install `PyJWT[crypto]` from `requirements-viewer.txt`.
 
-The viewer lists captured chunks and transcripts, but it cannot play completed audio because the receiver deletes audio after successful transcription. Changing that behavior requires an explicit retention policy and additional private storage.
+The viewer presents the original recordings and also derives speech events by joining nearby speech across chunk boundaries. Events omit long quiet regions while preserving enough padding for natural playback. When DeepFilterNet is configured, an event can also have an enhanced playback copy; the original recording is always retained according to the normal retention policy and remains selectable.
+
+Enhancement is deliberately playback-only. Transcription, diarization, and voiceprint learning continue to use the original recording so denoising cannot silently change recognition evidence. Derived event files are disposable cache: the storage manager evicts them before retained originals, and the receiver can recreate original event playback from retained source audio. Enhanced copies are regenerated for newly processed events rather than automatically after cache eviction. Use `--no-vad` or `--no-enhance` to disable either optional stage.
+
+The FluidAudio CLI currently needs the repository patch in `scripts/fluidaudio-vad-output-json.patch` to expose strict JSON from `vad-analyze --output-json`. Apply that patch to a compatible FluidAudio checkout and build its release CLI; do not commit the built binary or downloaded models. Install DeepFilterNet's official Apple Silicon release outside the repository and pass its absolute path through `--enhance-cli`.
 
 ## Recording behavior
 

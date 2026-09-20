@@ -450,6 +450,8 @@ class PersistenceAndViewerTests(unittest.TestCase):
             self.assertTrue({"engine", "word_count"} <= cols)
             self.assertIn("meeting_events", tables)
             self.assertIn("intervals", tables)
+            self.assertIn("speech_events", tables)
+            self.assertIn("vad_status", cols)
 
     def test_viewer_auth_origin_and_html_inert(self):
         with tempfile.TemporaryDirectory() as scratch:

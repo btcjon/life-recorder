@@ -9,7 +9,7 @@ import threading
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig
 
@@ -76,9 +76,13 @@ APP = """<!doctype html>
 <footer id="player-bar">
   <p id="now-playing">No recording selected</p>
   <audio id="player" controls></audio>
+  <div id="playback-mode" hidden>
+    <button id="play-original" type="button" aria-pressed="true">Original</button>
+    <button id="play-enhanced" type="button" aria-pressed="false" disabled>Enhanced</button>
+  </div>
   <button id="keep" type="button" hidden>Keep audio</button>
 </footer>
-<p id="help">Possible event labels are heuristic. TV or podcasts can still match. Audio is retained for seven days by default; Keep protects a clip.</p>
+<p id="help">Possible event labels are heuristic. TV or podcasts can still match. Audio is retained for seven days by default; Keep protects a clip. Enhanced playback is optional and never used for transcription.</p>
 <script src="/app.js"></script>
 </body>
 </html>
@@ -134,9 +138,10 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .person-option[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); }
 .popover-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .popover details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
+#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
 #now-playing { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 #player { width: min(520px, 100%); }
+#playback-mode { display: flex; gap: 6px; }
 #help { margin: 0; padding: 7px 20px; color: var(--muted); background: var(--surface); font-size: 11px; text-align: center; }
 details { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 summary { cursor: pointer; color: var(--muted); }
@@ -213,6 +218,9 @@ JS = r"""
   const player = document.getElementById("player");
   const nowPlaying = document.getElementById("now-playing");
   const keepButton = document.getElementById("keep");
+  const playbackMode = document.getElementById("playback-mode");
+  const playOriginal = document.getElementById("play-original");
+  const playEnhanced = document.getElementById("play-enhanced");
   const tabRecordings = document.getElementById("tab-recordings");
   const tabPeople = document.getElementById("tab-people");
   const filters = document.getElementById("filters");
@@ -224,6 +232,8 @@ JS = r"""
   let dayRequest = 0;
   let view = "recordings";
   let selectedId = null;
+  let selectedKind = "chunk";
+  let playbackKind = "original";
   let detailMode = "transcript";
   let openIdentityKey = null;
   let identityDraft = null;
@@ -287,8 +297,11 @@ JS = r"""
     const nextPayload = await response.json();
     if (requestId !== dayRequest) return;
     payload = nextPayload;
-    if (selectedId && !(payload.chunks || []).some((chunk) => chunk.id === selectedId)) {
+    const stillChunk = selectedKind === "chunk" && (payload.chunks || []).some((chunk) => chunk.id === selectedId);
+    const stillEvent = selectedKind === "event" && (payload.events || []).some((item) => item.id === selectedId);
+    if (selectedId && !stillChunk && !stillEvent) {
       selectedId = null;
+      selectedKind = "chunk";
       mobileDetailOpen = false;
     }
     render();
@@ -381,13 +394,44 @@ JS = r"""
       list.appendChild(node);
     }
     const chunks = visibleChunks();
-    if (!isMobile() && !selectedId && chunks[0]) selectedId = chunks[0].id;
+    const events = (search.value || "").trim() ? [] : (payload.events || []);
+    const eventRows = document.createDocumentFragment();
+    if (!isMobile() && !selectedId && chunks[0]) { selectedId = chunks[0].id; selectedKind = "chunk"; }
+    for (const item of events) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "row";
+      row.id = "event-" + item.id;
+      row.setAttribute("aria-current", selectedKind === "event" && item.id === selectedId ? "true" : "false");
+      const title = document.createElement("div");
+      title.textContent = (item.started_local || item.started || "Speech") + " · " + Number(item.playable_duration || item.duration || 0).toFixed(0) + "s";
+      const peek = document.createElement("div");
+      peek.className = "preview meta";
+      peek.textContent = "Speech event";
+      const audioNote = document.createElement("div");
+      audioNote.className = "meta";
+      audioNote.textContent = item.audio_playable ? (item.enhanced_playable ? "Original and enhanced audio" : "Original audio") : "Audio not kept";
+      row.appendChild(title);
+      row.appendChild(peek);
+      row.appendChild(audioNote);
+      row.addEventListener("click", () => {
+        selectedId = item.id;
+        selectedKind = "event";
+        openIdentityKey = null;
+        if (isMobile()) {
+          listScroll = list.scrollTop || window.scrollY || 0;
+          mobileDetailOpen = true;
+        }
+        render();
+      });
+      eventRows.appendChild(row);
+    }
     for (const chunk of chunks) {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "row";
       row.id = "recording-" + chunk.id;
-      row.setAttribute("aria-current", chunk.id === selectedId ? "true" : "false");
+      row.setAttribute("aria-current", selectedKind === "chunk" && chunk.id === selectedId ? "true" : "false");
       const title = document.createElement("div");
       title.textContent = (chunk.started_local || chunk.started || "Recording") + " · " + Number(chunk.duration || 0).toFixed(0) + "s";
       const peek = document.createElement("div");
@@ -400,8 +444,9 @@ JS = r"""
       row.appendChild(peek);
       row.appendChild(audioNote);
       row.addEventListener("click", () => {
-        if (selectedId !== chunk.id) openIdentityKey = null;
+        if (selectedKind !== "chunk" || selectedId !== chunk.id) openIdentityKey = null;
         selectedId = chunk.id;
+        selectedKind = "chunk";
         if (isMobile()) {
           listScroll = list.scrollTop || window.scrollY || 0;
           mobileDetailOpen = true;
@@ -414,34 +459,53 @@ JS = r"""
       });
       list.appendChild(row);
     }
-    if (!chunks.length) {
+    list.appendChild(eventRows);
+    if (!chunks.length && !events.length) {
       const empty = document.createElement("p");
       empty.className = "meta";
       empty.textContent = "No recordings match this day or search.";
       list.appendChild(empty);
     }
   }
-  function attachAudio(chunk) {
-    const nextAudioId = chunk && chunk.audio_playable ? chunk.id : null;
-    keepButton.hidden = !chunk || !chunk.audio_playable;
-    keepButton.disabled = !!(chunk && chunk.audio_pinned);
-    keepButton.textContent = chunk && chunk.audio_pinned ? "Kept" : "Keep audio";
-    nowPlaying.textContent = chunk ? ((chunk.started_local || "Recording") + (chunk.audio_playable ? "" : " · audio unavailable")) : "No recording selected";
-    keepButton.onclick = chunk && chunk.audio_playable ? async () => {
-      const keptId = chunk.id;
+  function selectedItem() {
+    if (selectedKind === "event") return (payload.events || []).find((item) => item.id === selectedId) || null;
+    return (payload.chunks || []).find((item) => item.id === selectedId) || null;
+  }
+  function attachAudio(item) {
+    const isEvent = selectedKind === "event";
+    const canOriginal = !!(item && item.audio_playable);
+    const canEnhanced = !!(isEvent && item && item.enhanced_playable);
+    if (isEvent && playbackKind === "enhanced" && !canEnhanced) playbackKind = "original";
+    playbackMode.hidden = !isEvent;
+    playOriginal.setAttribute("aria-pressed", String(!isEvent || playbackKind !== "enhanced"));
+    playEnhanced.setAttribute("aria-pressed", String(isEvent && playbackKind === "enhanced"));
+    playEnhanced.disabled = !canEnhanced;
+    keepButton.hidden = isEvent || !canOriginal;
+    keepButton.disabled = !!(item && item.audio_pinned);
+    keepButton.textContent = item && item.audio_pinned ? "Kept" : "Keep audio";
+    const label = item ? (item.started_local || (isEvent ? "Speech event" : "Recording")) : "No recording selected";
+    nowPlaying.textContent = item ? (label + (canOriginal ? "" : " · audio unavailable")) : "No recording selected";
+    keepButton.onclick = (!isEvent && canOriginal) ? async () => {
+      const keptId = item.id;
       const response = await fetch("/v1/chunks/" + keptId + "/keep", {
         method: "POST",
         headers: { ...authHeaders(), "Content-Type": "application/json" },
         body: "{}",
       });
       if (!response.ok) return;
-      const current = (payload.chunks || []).find((item) => item.id === keptId);
+      const current = (payload.chunks || []).find((row) => row.id === keptId);
       if (current) current.audio_pinned = true;
-      if (selectedId === keptId) {
+      if (selectedKind === "chunk" && selectedId === keptId) {
         keepButton.textContent = "Kept";
         keepButton.disabled = true;
       }
     } : null;
+    const audioPath = !item || !canOriginal ? null : (
+      isEvent
+        ? "/v1/events/" + item.id + "/audio?kind=" + (playbackKind === "enhanced" && canEnhanced ? "enhanced" : "original")
+        : "/v1/audio/" + item.id
+    );
+    const nextAudioId = audioPath ? ((isEvent ? "event:" : "chunk:") + item.id + ":" + (isEvent ? playbackKind : "original")) : null;
     if (nextAudioId === loadedAudioId) return;
     loadedAudioId = nextAudioId;
     audioGeneration += 1;
@@ -449,10 +513,10 @@ JS = r"""
     audioController = null;
     if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
     player.removeAttribute("src");
-    if (!chunk || !chunk.audio_playable) return;
-    const requestedId = chunk.id;
+    if (!audioPath) return;
+    const requestedId = nextAudioId;
     audioController = new AbortController();
-    fetch("/v1/audio/" + chunk.id, { headers: authHeaders(), signal: audioController.signal }).then((r) => r.ok ? r.blob() : Promise.reject()).then((blob) => {
+    fetch(audioPath, { headers: authHeaders(), signal: audioController.signal }).then((r) => r.ok ? r.blob() : Promise.reject()).then((blob) => {
       if (loadedAudioId !== requestedId) return;
       audioUrl = URL.createObjectURL(blob);
       player.src = audioUrl;
@@ -634,7 +698,36 @@ JS = r"""
   }
   function renderDetail() {
     pane.replaceChildren();
-    const chunk = (payload.chunks || []).find((item) => item.id === selectedId);
+    if (selectedKind === "event") {
+      const item = selectedItem();
+      attachAudio(item);
+      if (isMobile()) {
+        const back = document.createElement("button");
+        back.type = "button";
+        back.id = "back-recordings";
+        back.textContent = "Back to recordings";
+        back.addEventListener("click", () => {
+          mobileDetailOpen = false;
+          render();
+        });
+        pane.appendChild(back);
+      }
+      if (!item) {
+        const empty = document.createElement("p");
+        empty.textContent = "Select a recording.";
+        pane.appendChild(empty);
+        return;
+      }
+      const title = document.createElement("h2");
+      title.textContent = item.started_local || "Speech event";
+      const meta = document.createElement("p");
+      meta.className = "meta";
+      meta.textContent = Number(item.playable_duration || item.duration || 0).toFixed(1) + " seconds playable";
+      pane.appendChild(title);
+      pane.appendChild(meta);
+      return;
+    }
+    const chunk = selectedItem();
     attachAudio(chunk);
     if (isMobile()) {
       const back = document.createElement("button");
@@ -770,7 +863,7 @@ JS = r"""
             const expectedId = chunk.id;
             const expectedGeneration = audioGeneration;
             const jump = () => {
-              if (selectedId !== expectedId || loadedAudioId !== expectedId || audioGeneration !== expectedGeneration) return;
+              if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
               player.currentTime = Number(turn.started) || 0;
               player.play().catch(() => {});
             };
@@ -869,6 +962,8 @@ JS = r"""
   day.addEventListener("change", loadDay);
   search.addEventListener("input", render);
   showAll.addEventListener("change", render);
+  playOriginal.addEventListener("click", () => { playbackKind = "original"; render(); });
+  playEnhanced.addEventListener("click", () => { playbackKind = "enhanced"; render(); });
   window.addEventListener("resize", () => {
     const nextMobileLayout = isMobile();
     if (nextMobileLayout === mobileLayout) return;
@@ -990,6 +1085,22 @@ class ViewerHandler(BaseHTTPRequestHandler):
             raise ValueError("unsatisfiable")
         return start, min(end, size - 1)
 
+    def _audio_type(self, audio: Path) -> str:
+        suffix = audio.suffix.lower()
+        if suffix == ".wav":
+            return "audio/wav"
+        if suffix in (".m4a", ".mp4", ".aac"):
+            return "audio/mp4"
+        return "application/octet-stream"
+
+    def _event_audio(self, event_id: str, kind: str, include_body: bool):
+        if kind not in ("original", "enhanced"):
+            return self._json(400, {"error": "Invalid audio kind"})
+        audio = self._inbox().event_audio_path(event_id, kind)
+        if not audio or not audio.is_file():
+            return self._json(404, {"error": "Audio unavailable"})
+        return self._send_audio(audio, include_body=include_body)
+
     def _send_audio(self, audio: Path, include_body: bool):
         size = audio.stat().st_size
         start, end, status = 0, max(0, size - 1), 200
@@ -1005,7 +1116,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
         length = 0 if size == 0 else (end - start + 1)
         extra.pop("Content-Length", None)
         self.send_response(status)
-        self._headers("audio/mp4", length, extra)
+        self._headers(self._audio_type(audio), length, extra)
         if include_body and length:
             with audio.open("rb") as handle:
                 handle.seek(start)
@@ -1047,6 +1158,10 @@ class ViewerHandler(BaseHTTPRequestHandler):
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
             return self._send_audio(audio, include_body=False)
+        if path.startswith("/v1/events/") and path.endswith("/audio"):
+            event_id = path[len("/v1/events/"):-len("/audio")]
+            kind = (parse_qs(urlparse(self.path).query).get("kind") or ["original"])[0]
+            return self._event_audio(event_id, kind, include_body=False)
         return self._json(404, {"error": "Not found"})
 
     def do_GET(self):
@@ -1077,6 +1192,10 @@ class ViewerHandler(BaseHTTPRequestHandler):
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
             return self._send_audio(audio, include_body=True)
+        if path.startswith("/v1/events/") and path.endswith("/audio"):
+            event_id = path[len("/v1/events/"):-len("/audio")]
+            kind = (parse_qs(parsed.query).get("kind") or ["original"])[0]
+            return self._event_audio(event_id, kind, include_body=True)
         if path.startswith("/v1/days/"):
             day = path.removeprefix("/v1/days/")
             try:

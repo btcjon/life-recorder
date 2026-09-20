@@ -35,6 +35,10 @@ parser.add_argument("--viewer-remote-host", help="Exact public hostname allowed 
 parser.add_argument("--access-team-domain", help="Cloudflare Access team domain")
 parser.add_argument("--access-aud", help="Cloudflare Access application audience")
 parser.add_argument("--access-issuer", help="Optional Access issuer")
+parser.add_argument("--vad-cli", type=Path, help="FluidAudio CLI with strict vad-analyze JSON output")
+parser.add_argument("--enhance-cli", type=Path, help="Optional DeepFilterNet deep-filter executable")
+parser.add_argument("--no-vad", action="store_true", help="Disable derived speech events")
+parser.add_argument("--no-enhance", action="store_true", help="Disable enhanced playback")
 args = parser.parse_args()
 os.umask(0o077)
 root = args.data_dir.resolve()
@@ -86,6 +90,20 @@ if args.mlx_command:
     if not mlx_command.is_file():
         parser.error("--mlx-command must be an existing executable")
     command.extend(["--mlx-command", str(mlx_command), "--mlx-model", args.mlx_model])
+if args.vad_cli:
+    vad_cli = args.vad_cli.expanduser().resolve()
+    if not vad_cli.is_file():
+        parser.error("--vad-cli must be an existing executable")
+    command.extend(["--vad-cli", str(vad_cli)])
+if args.enhance_cli:
+    enhance_cli = args.enhance_cli.expanduser().resolve()
+    if not enhance_cli.is_file():
+        parser.error("--enhance-cli must be an existing executable")
+    command.extend(["--enhance-cli", str(enhance_cli)])
+if args.no_vad:
+    command.append("--no-vad")
+if args.no_enhance:
+    command.append("--no-enhance")
 if args.viewer_remote_host or args.access_team_domain or args.access_aud:
     if not (args.viewer_remote_host and args.access_team_domain and args.access_aud):
         parser.error("--viewer-remote-host, --access-team-domain, and --access-aud must be supplied together")

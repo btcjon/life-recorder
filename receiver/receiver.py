@@ -29,6 +29,7 @@ import detector as detector_mod
 import meetings as meetings_mod
 import viewer as viewer_mod
 import diarization as diarization_mod
+import vad as vad_mod
 
 MAX_UPLOAD = 32 * 1024 * 1024
 SESSION_GAP_SECONDS = 15 * 60
@@ -72,6 +73,8 @@ class Inbox:
         self.root.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.audio = self.root / "audio"
         self.audio.mkdir(exist_ok=True, mode=0o700)
+        self.events = self.root / "events"
+        self.events.mkdir(exist_ok=True, mode=0o700)
         self.days = self.root / "days"
         self.days.mkdir(exist_ok=True, mode=0o700)
         self.db = self.root / "inbox.sqlite3"
@@ -157,7 +160,7 @@ class Inbox:
                     """UPDATE chunks SET status='complete', transcript=?, error=NULL,
                        engine=?, asr_model=?, asr_summary=?, word_count=?, speech_density=?,
                        completed_at=?, audio_state='present', audio_bytes=?, audio_expires_at=?,
-                       words_json=?, diarization_status='pending'
+                       words_json=?, diarization_status='pending', vad_status='pending'
                        WHERE id=?""",
                     (cleaned, provenance.get("engine"), provenance.get("model"),
                      json.dumps(summary), word_count, density, now, audio_bytes,
@@ -189,7 +192,39 @@ class Inbox:
             rows = db.execute("""SELECT id,path,COALESCE(audio_bytes,0) AS audio_bytes,
                 audio_expires_at,audio_pinned FROM chunks WHERE status='complete'
                 AND audio_state='present' ORDER BY COALESCE(completed_at,received),id""").fetchall()
-            total = sum(int(row["audio_bytes"] or 0) for row in rows)
+            events = list(db.execute("SELECT id,enhancement_path,COALESCE(derived_bytes,0) AS derived_bytes FROM speech_events"))
+            known_assets = set()
+            derived_total = 0
+            for event in events:
+                for path in vad_mod.event_asset_paths(self.root, event["id"]).values():
+                    known_assets.add(path.resolve())
+                    if path.is_file() and not path.name.endswith(".tmp.wav"):
+                        derived_total += path.stat().st_size
+                extra = Path(event["enhancement_path"] or "")
+                if extra.is_file():
+                    known_assets.add(extra.resolve())
+            events_dir = self.root / "events"
+            if events_dir.is_dir():
+                for asset in events_dir.iterdir():
+                    if not asset.is_file():
+                        continue
+                    if asset.resolve() in known_assets and not asset.name.endswith(".tmp.wav"):
+                        continue
+                    if asset.resolve() not in known_assets or asset.name.endswith(".tmp.wav"):
+                        asset.unlink(missing_ok=True)
+            total = sum(int(row["audio_bytes"] or 0) for row in rows) + derived_total
+            if total > MAX_RETAINED_BYTES:
+                for event in events:
+                    removed = vad_mod.delete_event_assets(self.root, event["id"], event["enhancement_path"])
+                    if not removed:
+                        continue
+                    total = max(0, total - removed)
+                    db.execute("""UPDATE speech_events SET enhancement_path=NULL,
+                        enhancement_status='unavailable', derived_bytes=0,
+                        enhancement_error='cache_evicted', enhancement_retry_at=0 WHERE id=?""",
+                               (event["id"],))
+                    if total <= MAX_RETAINED_BYTES:
+                        break
             for row in rows:
                 expired = not row["audio_pinned"] and row["audio_expires_at"] is not None and row["audio_expires_at"] <= now
                 over_cap = not row["audio_pinned"] and total > MAX_RETAINED_BYTES
@@ -200,6 +235,18 @@ class Inbox:
                 path.unlink(missing_ok=True)
                 db.execute("UPDATE chunks SET audio_state='deleted',audio_bytes=0 WHERE id=?", (row["id"],))
                 total = max(0, total - size)
+            for event in events:
+                chunk_state = db.execute("""SELECT c.audio_state FROM speech_event_chunks e
+                    JOIN chunks c ON c.id=e.chunk_id WHERE e.event_id=?""", (event["id"],)).fetchall()
+                stale = (not chunk_state) or any(row["audio_state"] != "present" for row in chunk_state)
+                if not stale:
+                    size = vad_mod.derived_bytes_for(self.root, event["id"], event["enhancement_path"])
+                    db.execute("UPDATE speech_events SET derived_bytes=? WHERE id=?", (size, event["id"]))
+                    continue
+                removed = vad_mod.delete_event_assets(self.root, event["id"], event["enhancement_path"])
+                total = max(0, total - removed)
+                db.execute("""UPDATE speech_events SET enhancement_path=NULL, enhancement_status='unavailable',
+                    derived_bytes=0, enhancement_error='expired_source' WHERE id=?""", (event["id"],))
 
     def keep_audio(self, chunk_id: str, days: int = 14):
         days = max(1, min(int(days), 14))
@@ -210,6 +257,33 @@ class Inbox:
             db.execute("UPDATE chunks SET audio_pinned=1,audio_expires_at=? WHERE id=?",
                        (time.time() + min(days * 86400, MAX_RETENTION_SECONDS), chunk_id))
         return True
+
+    def event_audio_path(self, event_id: str, kind: str = "original"):
+        with self.connect() as db:
+            row = db.execute("SELECT * FROM speech_events WHERE id=?", (event_id,)).fetchone()
+            parts = list(db.execute("""SELECT c.path, c.audio_state FROM speech_event_chunks e
+                JOIN chunks c ON c.id=e.chunk_id WHERE e.event_id=?""", (event_id,)))
+        if not row:
+            return None
+        assets = vad_mod.event_asset_paths(self.root, event_id)
+        sources_ok = bool(parts) and all(part["audio_state"] == "present" and Path(part["path"]).is_file() for part in parts)
+        if not sources_ok:
+            vad_mod.delete_event_assets(self.root, event_id, row["enhancement_path"])
+            with self.connect() as db:
+                db.execute("""UPDATE speech_events SET enhancement_path=NULL, enhancement_status='unavailable',
+                    derived_bytes=0, enhancement_error='expired_source' WHERE id=?""", (event_id,))
+            return None
+        if kind == "enhanced":
+            enhanced = Path(row["enhancement_path"] or assets["enhanced"])
+            return enhanced if enhanced.is_file() else None
+        original = assets["original"]
+        if original.is_file():
+            return original
+        ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg:
+            return None
+        extracted = vad_mod.extract_event_audio(self, event_id, ffmpeg, original)
+        return extracted if extracted and extracted.is_file() else None
 
     def export(self):
         with self.lock, self.connect() as db:
@@ -362,6 +436,43 @@ class Inbox:
                 "diarization": self.diarization_summary(row["id"]),
                 "speakers": self.speaker_turns(row["id"]),
             })
+        events = []
+        with self.connect() as db:
+            event_rows = db.execute("SELECT * FROM speech_events ORDER BY started,id").fetchall()
+            part_rows = db.execute("SELECT * FROM speech_event_chunks").fetchall()
+        parts_by_event = {}
+        for part in part_rows:
+            parts_by_event.setdefault(part["event_id"], []).append({
+                "chunk_id": part["chunk_id"],
+                "start": part["start_seconds"],
+                "end": part["end_seconds"],
+            })
+        for row in event_rows:
+            started = meetings_mod.parse_utc(row["started"])
+            finished = meetings_mod.parse_utc(row["ended"])
+            if finished <= start_utc or started >= end_utc:
+                continue
+            enhanced = Path(row["enhancement_path"] or (self.root / "events" / (row["id"] + ".enhanced.wav")))
+            original = self.root / "events" / (row["id"] + ".wav")
+            source_playable = []
+            for part in parts_by_event.get(row["id"], []):
+                chunk = self.receipt(part["chunk_id"])
+                source_playable.append(bool(
+                    chunk and chunk["audio_state"] == "present" and Path(chunk["path"]).is_file()
+                ))
+            events.append({
+                "id": row["id"],
+                "started": row["started"],
+                "started_local": started.astimezone(DISPLAY_ZONE).strftime("%Y-%m-%d %H:%M %Z"),
+                "ended": row["ended"],
+                "duration": row["duration"],
+                "playable_duration": row["playable_duration"] or row["duration"],
+                "source": row["source"],
+                "chunks": parts_by_event.get(row["id"], []),
+                "audio_playable": original.is_file() or (bool(source_playable) and all(source_playable)),
+                "enhanced_playable": enhanced.is_file(),
+                "enhancement_status": row["enhancement_status"] or "unavailable",
+            })
         with self.connect() as db:
             interval_rows = db.execute(
                 "SELECT * FROM intervals ORDER BY started_at, id"
@@ -393,6 +504,7 @@ class Inbox:
             "errors": errors,
             "speakers": None,
             "people": self.people(),
+            "events": events,
         }
 
     def diarization_summary(self, chunk_id: str):
@@ -800,6 +912,10 @@ def main():
     parser.add_argument("--parakeet-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
     parser.add_argument("--parakeet-model-dir", type=Path, default=asr_mod.DEFAULT_PARAKEET_MODEL_DIR)
     parser.add_argument("--diarization-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
+    parser.add_argument("--vad-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
+    parser.add_argument("--enhance-cli", type=Path, help="Optional deep-filter CLI for playback-only enhancement")
+    parser.add_argument("--no-vad", action="store_true")
+    parser.add_argument("--no-enhance", action="store_true")
     parser.add_argument("--init", action="store_true", help="Create the inbox, then exit")
     parser.add_argument("--viewer-remote-host", help="Exact public hostname allowed to reach the loopback viewer")
     parser.add_argument("--access-team-domain", help="Cloudflare Access team domain, for example example.cloudflareaccess.com")
@@ -849,6 +965,10 @@ def main():
     if args.ffmpeg and args.diarization_cli.is_file():
         threading.Thread(target=diarization_mod.worker,
                          args=(inbox, stop, args.diarization_cli, args.ffmpeg), daemon=True).start()
+    if args.ffmpeg and not args.no_vad and args.vad_cli.is_file():
+        enhance = None if args.no_enhance else args.enhance_cli
+        threading.Thread(target=vad_mod.worker,
+                         args=(inbox, stop, args.vad_cli, args.ffmpeg, enhance), daemon=True).start()
     remote = None
     remote_host = args.viewer_remote_host or os.environ.get("LIFE_RECORDER_VIEWER_REMOTE_HOST")
     if remote_host or args.access_team_domain or args.access_aud:

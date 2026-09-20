@@ -1,0 +1,106 @@
+diff --git a/Sources/FluidAudioCLI/Commands/VadAnalyzeCommand.swift b/Sources/FluidAudioCLI/Commands/VadAnalyzeCommand.swift
+index 569b64b..235af10 100644
+--- a/Sources/FluidAudioCLI/Commands/VadAnalyzeCommand.swift
++++ b/Sources/FluidAudioCLI/Commands/VadAnalyzeCommand.swift
+@@ -24,6 +24,7 @@ enum VadAnalyzeCommand {
+         var minSilenceAtMaxSpeech: TimeInterval?
+         var useMaxSilenceAtMaxSpeech: Bool = true
+         var exportPath: String?
++        var jsonOutputPath: String?
+     }
+ 
+     static func run(arguments: [String]) async {
+@@ -78,6 +79,11 @@ enum VadAnalyzeCommand {
+                     let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                     return trimmed.isEmpty ? nil : trimmed
+                 }
++            case "--output-json":
++                options.jsonOutputPath = parseString(arguments, &index) { raw in
++                    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
++                    return trimmed.isEmpty ? nil : trimmed
++                }
+             default:
+                 if arg.hasPrefix("--") {
+                     logger.warning("Unknown option: \(arg)")
+@@ -108,16 +114,25 @@ enum VadAnalyzeCommand {
+ 
+             let segmentationConfig = buildSegmentationConfig(options: options)
+ 
+-            let shouldRunSegmentation = !options.streaming || options.exportPath != nil
++            let shouldRunSegmentation = !options.streaming || options.exportPath != nil || options.jsonOutputPath != nil
+             var segments: [VadSegment] = []
+ 
+             if shouldRunSegmentation {
+-                segments = await runSegmentation(
++                segments = try await runSegmentation(
+                     manager: manager,
+                     samples: samples,
+                     config: segmentationConfig
+                 )
+ 
++                if let jsonPath = options.jsonOutputPath {
++                    try writeJSON(
++                        audioPath: audioPath,
++                        samples: samples,
++                        segments: segments,
++                        destinationPath: jsonPath
++                    )
++                }
++
+                 if let exportPath = options.exportPath {
+                     exportSpeechSegments(
+                         segments: segments,
+@@ -145,7 +160,7 @@ enum VadAnalyzeCommand {
+         manager: VadManager,
+         samples: [Float],
+         config: VadSegmentationConfig
+-    ) async -> [VadSegment] {
++    ) async throws -> [VadSegment] {
+         do {
+             logger.info("📍 Running offline speech segmentation...")
+             let inferenceStart = Date()
+@@ -190,10 +205,35 @@ enum VadAnalyzeCommand {
+             return segments
+         } catch {
+             logger.error("Segmentation failed: \(error)")
+-            return []
++            throw error
+         }
+     }
+ 
++    private static func writeJSON(
++        audioPath: String,
++        samples: [Float],
++        segments: [VadSegment],
++        destinationPath: String
++    ) throws {
++        let duration = Double(samples.count) / Double(VadManager.sampleRate)
++        let payload: [String: Any] = [
++            "audioFile": audioPath,
++            "durationSeconds": duration,
++            "sampleRate": VadManager.sampleRate,
++            "backend": "silero",
++            "segments": segments.map { segment -> [String: Any] in
++                [
++                    "startTime": segment.startTime,
++                    "endTime": segment.endTime,
++                    "startSample": segment.startSample(sampleRate: VadManager.sampleRate),
++                    "endSample": segment.endSample(sampleRate: VadManager.sampleRate),
++                ]
++            },
++        ]
++        let data = try JSONSerialization.data(withJSONObject: payload, options: [.prettyPrinted, .sortedKeys])
++        try data.write(to: URL(fileURLWithPath: destinationPath), options: .atomic)
++    }
++
+     private enum ExportError: Error {
+         case failedToCreateBuffer
+         case failedToAccessChannelData
+@@ -447,6 +487,7 @@ enum VadAnalyzeCommand {
+                 --min-silence-max-ms <double>            Silence guard used when hitting max speech duration
+                 --use-last-silence                       Prefer the last candidate silence when splitting
+                 --export-wav <path>                      Write detected speech segments to a single WAV file
++                --output-json <path>                     Write strict JSON segments (fails closed on error)
+ 
+             Examples:
+                 fluidaudio vad-analyze audio.wav

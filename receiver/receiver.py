@@ -427,15 +427,19 @@ class Inbox:
     def speaker_turns(self, chunk_id: str):
         with self.connect() as db:
             chunk = db.execute("SELECT words_json FROM chunks WHERE id=?", (chunk_id,)).fetchone()
-            rows = db.execute("""SELECT t.id,t.speaker_key,t.started,t.ended,t.quality,
+            rows = db.execute("""SELECT t.id,t.run_id,t.speaker_key,t.started,t.ended,t.quality,
                 t.person_id,t.label_source,p.name,t.embedding_json FROM speaker_turns t
                 LEFT JOIN people p ON p.id=t.person_id WHERE t.chunk_id=? ORDER BY t.started""",
                 (chunk_id,)).fetchall()
+            latest = db.execute("""SELECT id FROM speaker_runs WHERE chunk_id=?
+                ORDER BY created_at DESC LIMIT 1""", (chunk_id,)).fetchone()
+        latest_run = latest["id"] if latest else None
         words = json.loads(chunk["words_json"] or "[]") if chunk else []
         profiles = self.voice_profiles()
         output = []
         for row in rows:
             item = dict(row)
+            item["preserved"] = bool(item.get("person_id") and latest_run and item.get("run_id") != latest_run)
             embedding = json.loads(item.pop("embedding_json") or "null")
             selected = []
             for word in words:

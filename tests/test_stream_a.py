@@ -482,6 +482,10 @@ class PersistenceAndViewerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn("textContent", viewer_mod.JS)
                 self.assertNotIn("innerHTML", viewer_mod.JS)
+                self.assertIn("Choose a person…", viewer_mod.JS)
+                self.assertIn("data-identity-editor", viewer_mod.JS)
+                self.assertIn("tab-recordings", viewer_mod.APP)
+                self.assertIn("tab-people", viewer_mod.APP)
                 self.assertIn("Content-Security-Policy", {k.title(): k for k in page_headers} | {k: k for k in page_headers})
                 status, _, _ = get("/v1/days", {"Host": "127.0.0.1"})
                 self.assertEqual(status, 401)
@@ -937,6 +941,45 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertEqual(labeled[0]["started"], 0.0)
             self.assertEqual(labeled[0]["ended"], 10.0)
             self.assertTrue(any(turn["started"] == 9.0 for turn in unlabeled))
+
+    def test_turn_json_includes_run_and_preserved_flag(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            inbox = Inbox(Path(scratch))
+            chunk_id = str(uuid.uuid4())
+            dest = inbox.audio / (chunk_id + ".m4a")
+            dest.write_bytes(b"audio")
+            with inbox.connect() as db:
+                db.execute("""INSERT INTO chunks (id,sha256,device,started,duration,path,received,status,audio_state,words_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (chunk_id, "e" * 64, str(uuid.uuid4()), "2026-09-10T12:00:00.000Z",
+                     10.0, str(dest), 0, "complete", "present", "[]"))
+            diarization_mod.save_result(inbox, chunk_id, {
+                "turns": [{"speaker_key": "S1", "started": 0.0, "ended": 4.0, "quality": 1.0,
+                           "embedding": [1.0] + [0.0] * 127}],
+                "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
+                "speech_seconds": 4.0, "coverage": 0.4, "turn_count": 1,
+                "embedding_count": 1, "cluster_count": 1, "asr_words": 1,
+            })
+            person = inbox.create_person("Jon")
+            with inbox.connect() as db:
+                turn_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,)).fetchone()[0]
+            self.assertTrue(inbox.label_turn(turn_id, person["id"]))
+            diarization_mod.save_result(inbox, chunk_id, {
+                "turns": [{"speaker_key": "S2", "started": 5.0, "ended": 8.0, "quality": 1.0,
+                           "embedding": [0.0, 1.0] + [0.0] * 126}],
+                "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
+                "speech_seconds": 3.0, "coverage": 0.3, "turn_count": 1,
+                "embedding_count": 1, "cluster_count": 1, "asr_words": 1,
+            })
+            turns = inbox.speaker_turns(chunk_id)
+            self.assertTrue(any(turn.get("run_id") for turn in turns))
+            self.assertTrue(any(turn.get("preserved") and turn.get("person_id") == person["id"] for turn in turns))
+
+    def test_identity_editor_starts_empty_for_zero_or_one_person(self):
+        self.assertIn('blank.textContent = "Choose a person…"', viewer_mod.JS)
+        self.assertIn("save.disabled = true", viewer_mod.JS)
+        self.assertIn("No people yet", viewer_mod.JS)
+        self.assertNotIn("if (person.id === turn.person_id) option.selected = true", viewer_mod.JS)
 
 
 if __name__ == "__main__":

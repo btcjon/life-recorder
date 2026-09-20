@@ -120,6 +120,11 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                     request.setValue(QueueStore.deviceID, forHTTPHeaderField: "X-Device-ID")
                     request.setValue(Self.timestamp(chunk.startedAt), forHTTPHeaderField: "X-Started-At")
                     request.setValue(String(chunk.duration), forHTTPHeaderField: "X-Duration-Seconds")
+                    if let activity = chunk.activity {
+                        let value = String(activity.headerValue.prefix(256))
+                        request.setValue(value, forHTTPHeaderField: "X-Activity-Shadow")
+                        request.setValue(String(activity.version), forHTTPHeaderField: "X-Activity-Version")
+                    }
                     let task = self.session.uploadTask(with: request, fromFile: chunk.audioURL)
                     task.taskDescription = Self.taskDescription(for: chunk.name)
                     task.countOfBytesClientExpectsToSend = (try? chunk.audioURL.resourceValues(forKeys: [.fileSizeKey]).fileSize)

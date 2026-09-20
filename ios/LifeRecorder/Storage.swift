@@ -3,11 +3,47 @@ import CryptoKit
 import Foundation
 import Security
 
+struct ChunkActivity: Codable, Equatable {
+    var version: Int
+    var decision: String
+    var coverageComplete: Bool
+    var windowCount: Int
+    var expectedWindows: Int
+    var maxRMSDBFS: Double?
+    var peakDBFS: Double?
+    var reason: String
+
+    init(_ decision: ActivityDecision) {
+        version = decision.version
+        self.decision = decision.decision.rawValue
+        coverageComplete = decision.coverageComplete
+        windowCount = decision.windowCount
+        expectedWindows = decision.expectedWindows
+        maxRMSDBFS = decision.maxRMSDBFS
+        peakDBFS = decision.peakDBFS
+        reason = decision.reason
+    }
+
+    var headerValue: String {
+        ActivityDecision(
+            version: version,
+            decision: ActivityDecision.Decision(rawValue: decision) ?? .unknown,
+            coverageComplete: coverageComplete,
+            windowCount: windowCount,
+            expectedWindows: expectedWindows,
+            maxRMSDBFS: maxRMSDBFS,
+            peakDBFS: peakDBFS,
+            reason: reason
+        ).headerValue
+    }
+}
+
 struct Chunk: Codable {
     let id: UUID
     let startedAt: Date
     let duration: Double
     let sha256: String
+    var activity: ChunkActivity? = nil
     var name: String { id.uuidString.lowercased() }
     var audioURL: URL { QueueStore.directory.appendingPathComponent(name + ".m4a") }
     var manifestURL: URL { QueueStore.directory.appendingPathComponent(name + ".json") }
@@ -53,11 +89,12 @@ enum QueueStore {
         return hash.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
-    static func seal(_ journal: RecordingJournal, duration: Double) throws -> Chunk {
+    static func seal(_ journal: RecordingJournal, duration: Double, activity: ActivityDecision? = nil) throws -> Chunk {
         let name = journal.id.uuidString.lowercased()
         let audio = directory.appendingPathComponent(name + ".m4a")
         let chunk = Chunk(id: journal.id, startedAt: journal.startedAt, duration: duration,
-                          sha256: try checksum(audio))
+                          sha256: try checksum(audio),
+                          activity: activity.map(ChunkActivity.init))
         try JSONEncoder().encode(chunk).write(to: chunk.manifestURL, options: .atomic)
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(name + ".recording.json"))
         return chunk
@@ -72,7 +109,7 @@ enum QueueStore {
                 let audio = directory.appendingPathComponent(journal.id.uuidString.lowercased() + ".m4a")
                 let duration = try await AVURLAsset(url: audio).load(.duration).seconds
                 guard duration.isFinite && duration > 0 else { unrecoverable += 1; continue }
-                _ = try seal(journal, duration: duration)
+                _ = try seal(journal, duration: duration, activity: ActivityProbe.recoveredUnknown())
             } catch {
                 // Keep an incomplete file for recovery; never pretend it was uploaded.
                 unrecoverable += 1

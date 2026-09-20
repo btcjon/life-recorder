@@ -10,7 +10,10 @@ SESSION_GAP = timedelta(minutes=15)
 MAX_MEETING = timedelta(hours=4)
 MAX_BODY = 4 * 1024
 MAX_FUTURE = timedelta(minutes=5)
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
+ACTIVITY_VERSION = 1
+HOLD_RMS_DBFS = -60.0
+HOLD_PEAK_DBFS = -45.0
 
 
 def parse_utc(value: str) -> datetime:
@@ -80,6 +83,14 @@ def migrate_schema(db) -> None:
         "vad_status": "TEXT NOT NULL DEFAULT 'pending'",
         "vad_error": "TEXT", "vad_attempts": "INTEGER NOT NULL DEFAULT 0",
         "vad_retry_at": "REAL NOT NULL DEFAULT 0",
+        "activity_version": "INTEGER",
+        "activity_decision": "TEXT",
+        "activity_coverage": "INTEGER",
+        "activity_windows": "INTEGER",
+        "activity_expected": "INTEGER",
+        "activity_rms_dbfs": "REAL",
+        "activity_peak_dbfs": "REAL",
+        "activity_reason": "TEXT",
     }
     for name, declaration in additions.items():
         if name not in cols:
@@ -181,6 +192,70 @@ def migrate_schema(db) -> None:
     )""")
     if version < SCHEMA_VERSION:
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+
+
+def parse_activity_header(value: str | None, version_header: str | None = None):
+    """Parse optional shadow telemetry. Invalid input returns None; never raises for upload."""
+    if value in (None, ""):
+        return None
+    if not isinstance(value, str) or len(value) > 256:
+        return None
+    fields = {}
+    for part in value.split(";"):
+        if "=" not in part:
+            return None
+        key, raw = part.split("=", 1)
+        key = key.strip()
+        raw = raw.strip()
+        if not key or not raw or key in fields:
+            return None
+        fields[key] = raw
+    try:
+        version = int(fields.get("v") or version_header or 0)
+    except (TypeError, ValueError):
+        return None
+    if version != ACTIVITY_VERSION:
+        return None
+    decision = fields.get("d")
+    if decision not in ("would_hold", "would_upload", "unknown"):
+        return None
+    try:
+        coverage = int(fields.get("c", "0"))
+        windows = int(fields.get("w", "0"))
+        expected = int(fields.get("e", "0"))
+    except (TypeError, ValueError):
+        return None
+    if coverage not in (0, 1) or windows < 0 or expected < 0 or windows > 10000 or expected > 10000:
+        return None
+    reason = fields.get("r", "unknown")
+    if not reason.replace("_", "").isalnum() or len(reason) > 32:
+        return None
+    rms = fields.get("rms")
+    peak = fields.get("pk")
+    try:
+        rms_value = float(rms) if rms is not None else None
+        peak_value = float(peak) if peak is not None else None
+    except (TypeError, ValueError):
+        return None
+    for number in (rms_value, peak_value):
+        if number is not None and (number != number or number in (float("inf"), float("-inf")) or abs(number) > 200):
+            return None
+    if decision == "would_hold":
+        if coverage != 1 or expected <= 0 or windows != expected or rms_value is None or peak_value is None:
+            return None
+        if not (rms_value < HOLD_RMS_DBFS and peak_value < HOLD_PEAK_DBFS):
+            return None
+    return {
+        "version": version,
+        "decision": decision,
+        "coverage": coverage,
+        "windows": windows,
+        "expected": expected,
+        "rms_dbfs": rms_value,
+        "peak_dbfs": peak_value,
+        "reason": reason,
+    }
 
 
 def validate_event(payload: dict, now: datetime | None = None) -> dict:

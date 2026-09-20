@@ -125,7 +125,7 @@ class Inbox:
             return db.execute("SELECT * FROM chunks WHERE id=?", (chunk_id,)).fetchone()
 
     def accept(self, tmp: Path, chunk_id: str, digest: str, device: str,
-               started: str, duration: float):
+               started: str, duration: float, activity=None):
         with self.lock:
             old = self.receipt(chunk_id)
             if old:
@@ -138,8 +138,19 @@ class Inbox:
             sync_dir(self.audio)
             with self.connect() as db:
                 db.execute("""INSERT INTO chunks
-                    (id,sha256,device,started,duration,path,received) VALUES (?,?,?,?,?,?,?)""",
-                    (chunk_id, digest, device, started, duration, str(dest), time.time()))
+                    (id,sha256,device,started,duration,path,received,activity_version,activity_decision,
+                     activity_coverage,activity_windows,activity_expected,activity_rms_dbfs,
+                     activity_peak_dbfs,activity_reason)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (chunk_id, digest, device, started, duration, str(dest), time.time(),
+                     None if not activity else activity["version"],
+                     None if not activity else activity["decision"],
+                     None if not activity else activity["coverage"],
+                     None if not activity else activity["windows"],
+                     None if not activity else activity["expected"],
+                     None if not activity else activity["rms_dbfs"],
+                     None if not activity else activity["peak_dbfs"],
+                     None if not activity else activity["reason"]))
             return True
 
     def complete(self, chunk_id: str, transcript: str, provenance: dict | None = None):
@@ -505,6 +516,45 @@ class Inbox:
             "speakers": None,
             "people": self.people(),
             "events": events,
+            "activity_shadow": self.activity_shadow_summary(start_utc, end_utc),
+        }
+
+    def activity_shadow_summary(self, start_utc, end_utc) -> dict:
+        evaluated = 0
+        would_hold = 0
+        would_upload = 0
+        unknown = 0
+        vad_complete = 0
+        hold_vad_positive = 0
+        for row in self.all_chunks():
+            started, finished = meetings_mod.chunk_span(row)
+            if finished <= start_utc or started >= end_utc:
+                continue
+            decision = row["activity_decision"]
+            if decision not in ("would_hold", "would_upload", "unknown"):
+                continue
+            evaluated += 1
+            if decision == "would_hold":
+                would_hold += 1
+            elif decision == "would_upload":
+                would_upload += 1
+            else:
+                unknown += 1
+            if row["vad_status"] != "complete":
+                continue
+            vad_complete += 1
+            with self.connect() as db:
+                spans = db.execute("SELECT 1 FROM chunk_speech_spans WHERE chunk_id=? LIMIT 1",
+                                   (row["id"],)).fetchone()
+            if decision == "would_hold" and spans:
+                hold_vad_positive += 1
+        return {
+            "evaluated": evaluated,
+            "would_hold": would_hold,
+            "would_upload": would_upload,
+            "unknown": unknown,
+            "vad_complete": vad_complete,
+            "hold_vad_positive": hold_vad_positive,
         }
 
     def diarization_summary(self, chunk_id: str):
@@ -807,8 +857,12 @@ class Handler(BaseHTTPRequestHandler):
                 os.fsync(f.fileno())
             if not hmac.compare_digest(sha.hexdigest(), digest):
                 return self.respond(422, {"error": "Checksum mismatch"})
+            activity = meetings_mod.parse_activity_header(
+                self.headers.get("X-Activity-Shadow"),
+                self.headers.get("X-Activity-Version"),
+            )
             try:
-                new = self.inbox.accept(tmp, chunk_id, digest, device, started, duration)
+                new = self.inbox.accept(tmp, chunk_id, digest, device, started, duration, activity)
             except ValueError:
                 return self.respond(409, {"error": "Chunk ID conflict"})
             self.respond(201 if new else 200, {"id": chunk_id, "sha256": digest, "durable": True})

@@ -54,6 +54,8 @@ The viewer presents the original recordings and also derives speech events by jo
 
 Enhancement is deliberately playback-only. Transcription, diarization, and voiceprint learning continue to use the original recording so denoising cannot silently change recognition evidence. Derived event files are disposable cache: the storage manager evicts them before retained originals, and the receiver can recreate original event playback from retained source audio. Enhanced copies are regenerated for newly processed events rather than automatically after cache eviction. Use `--no-vad` or `--no-enhance` to disable either optional stage.
 
+The iPhone still uploads every completed chunk. It also computes a shadow activity decision from 20 ms peak/RMS windows and may send `X-Activity-Shadow`. That header never changes upload, retry, or local delete. `would_hold` is conservative and only emitted for complete finite coverage below -60 dBFS RMS and -45 dBFS peak; recovered, unsupported, or incomplete audio is `unknown`. The Mac stores valid telemetry, ignores invalid telemetry, and compares it only against completed VAD in the viewer summary.
+
 The FluidAudio CLI currently needs the repository patch in `scripts/fluidaudio-vad-output-json.patch` to expose strict JSON from `vad-analyze --output-json`. Apply that patch to a compatible FluidAudio checkout and build its release CLI; do not commit the built binary or downloaded models. Install DeepFilterNet's official Apple Silicon release outside the repository and pass its absolute path through `--enhance-cli`.
 
 ## Recording behavior

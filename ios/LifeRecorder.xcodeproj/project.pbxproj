@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		066F079475FA4272323846E7 /* UploadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4912CAE16CD5C6C2B739463D /* UploadManager.swift */; };
 		1F2B7EE6A773F6B72AC416FA /* ChunkWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979FEA5285A0B5B0F31DCFD4 /* ChunkWriter.swift */; };
+		B2D8F12F8B2D5C1F0A32E002 /* ActivityProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1C7E01E7A1C4B0E9F21D001 /* ActivityProbe.swift */; };
+		D4F0B3410D4F7E312C540004 /* ActivityProbeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3E9A2309C3E6D201B43F003 /* ActivityProbeTests.swift */; };
 		49B7E576C31EC0BB95B19780 /* LifeRecorderApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39F3DBEC2972B9DED3119424 /* LifeRecorderApp.swift */; };
 		54662EB8B6B32A2F28B52B84 /* Storage.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1E138E288F79C8B5DE281250 /* Storage.swift */; };
 		8C34593B9CD5B393F7C90C6D /* NativeUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A0E11377963676F1DB20DB /* NativeUploadTests.swift */; };
@@ -39,6 +41,8 @@
 		7C47086B1533C94C651B4CCF /* LifeRecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		93F1329E2C2FBAECB7B7FD74 /* RecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderTests.swift; sourceTree = "<group>"; };
 		979FEA5285A0B5B0F31DCFD4 /* ChunkWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChunkWriter.swift; sourceTree = "<group>"; };
+		A1C7E01E7A1C4B0E9F21D001 /* ActivityProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityProbe.swift; sourceTree = "<group>"; };
+		C3E9A2309C3E6D201B43F003 /* ActivityProbeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityProbeTests.swift; sourceTree = "<group>"; };
 		B35B1754886B3F5500411113 /* Recorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recorder.swift; sourceTree = "<group>"; };
 		A11C01E70000000000000011 /* QuietHours.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietHours.swift; sourceTree = "<group>"; };
 		A11C01E70000000000000012 /* QuietHoursTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietHoursTests.swift; sourceTree = "<group>"; };
@@ -50,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				979FEA5285A0B5B0F31DCFD4 /* ChunkWriter.swift */,
+				A1C7E01E7A1C4B0E9F21D001 /* ActivityProbe.swift */,
 				248F26ABAF4F063BA289ED46 /* Info.plist */,
 				39F3DBEC2972B9DED3119424 /* LifeRecorderApp.swift */,
 				A11C01E70000000000000013 /* AudioRouting.swift */,
@@ -76,6 +81,7 @@
 				73A0E11377963676F1DB20DB /* NativeUploadTests.swift */,
 				A11C01E70000000000000012 /* QuietHoursTests.swift */,
 				93F1329E2C2FBAECB7B7FD74 /* RecorderTests.swift */,
+				C3E9A2309C3E6D201B43F003 /* ActivityProbeTests.swift */,
 			);
 			path = LifeRecorderTests;
 			sourceTree = "<group>";
@@ -170,6 +176,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				1F2B7EE6A773F6B72AC416FA /* ChunkWriter.swift in Sources */,
+				B2D8F12F8B2D5C1F0A32E002 /* ActivityProbe.swift in Sources */,
 				49B7E576C31EC0BB95B19780 /* LifeRecorderApp.swift in Sources */,
 				A11C01E70000000000000001 /* QuietHours.swift in Sources */,
 				E84B72E8AEAE0DAE896AF8A6 /* Recorder.swift in Sources */,
@@ -186,6 +193,7 @@
 				8C34593B9CD5B393F7C90C6D /* NativeUploadTests.swift in Sources */,
 				A11C01E70000000000000002 /* QuietHoursTests.swift in Sources */,
 				C87128C9329B9A638C31BF46 /* RecorderTests.swift in Sources */,
+				D4F0B3410D4F7E312C540004 /* ActivityProbeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

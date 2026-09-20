@@ -11,6 +11,7 @@ final class ChunkWriter: @unchecked Sendable {
     private let startedAt = Date()
     private var sampleRate: Double = 48000
     private var failed = false
+    private var probe = WindowAccumulator()
     private let onChunk: () -> Void
     private let onError: (String) -> Void
 
@@ -33,6 +34,7 @@ final class ChunkWriter: @unchecked Sendable {
             guard !failed else { return }
             do {
                 if file == nil { try begin(format: copy.format) }
+                probe.consume(copy)
                 try file?.write(from: copy)
                 chunkFrames += Int64(copy.frameLength)
                 totalFrames += Int64(copy.frameLength)
@@ -69,14 +71,20 @@ final class ChunkWriter: @unchecked Sendable {
                                               ofItemAtPath: outputURL.path)
         journal = next
         chunkFrames = 0
+        probe.begin(format: format, duration: 60)
     }
 
     private func finishChunk() throws {
         file = nil // Closing finalizes the M4A container before computing the checksum.
         guard let journal, chunkFrames > 0 else { return }
-        _ = try QueueStore.seal(journal, duration: Double(chunkFrames) / sampleRate)
+        let duration = Double(chunkFrames) / sampleRate
+        probe.beginExpected(duration: duration)
+        probe.finish()
+        let decision = ActivityProbe.decide(from: probe)
+        _ = try QueueStore.seal(journal, duration: duration, activity: decision)
         self.journal = nil
         chunkFrames = 0
+        probe.reset()
         onChunk()
     }
 

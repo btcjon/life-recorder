@@ -308,6 +308,11 @@ JS = r"""
     const issues = [];
     if (payload.pending) issues.push(payload.pending + " pending");
     if (payload.errors) issues.push(payload.errors + " errors");
+    const shadow = payload.activity_shadow || {};
+    if (Number(shadow.evaluated) > 0) {
+      issues.push(Number(shadow.would_hold || 0) + "/" + Number(shadow.evaluated) + " shadow-hold");
+      if (Number(shadow.hold_vad_positive) > 0) issues.push(Number(shadow.hold_vad_positive) + " hold/VAD disagreement");
+    }
     status.textContent = issues.length ? issues.join(" · ") : "Loaded";
   }
   function setView(next) {

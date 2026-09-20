@@ -108,14 +108,18 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .meta { color: var(--muted); font-size: 12px; }
 .preview { margin: 4px 0 0; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
-.speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; }
-.speakers-label { color: var(--muted); font-size: 12px; font-weight: 650; margin-right: 4px; }
+.speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; position: relative; }
 .pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
 .pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(36,95,204,.25); }
 .pill[aria-disabled="true"] { cursor: default; opacity: .85; }
 .group > p { margin: 7px 0; padding-left: 12px; border-left: 3px solid #d9dfe8; }
-.identity { margin: 12px 0 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: #f8fafc; }
-.identity label { display: block; margin: 6px 0; }
+.identity-anchor { position: static; display: inline-flex; }
+.popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(24,33,47,.16); }
+.person-option { display: flex; width: 100%; margin: 0 0 4px; text-align: left; }
+.person-option[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); }
+.popover-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
+.popover details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
+@media (max-width: 390px) { .popover { width: calc(100vw - 44px); } }
 #player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
 #now-playing { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 #player { width: min(520px, 100%); }
@@ -169,7 +173,13 @@ JS = r"""
   let selectedId = null;
   let detailMode = "transcript";
   let openIdentityKey = null;
-  let focusIdentity = false;
+  let identityDraft = null;
+  let identityMode = "list";
+  let createdPersonId = null;
+  let createdPersonKey = null;
+  let createdPersonName = null;
+  let identitySample = false;
+  let identityNewName = "";
   function authHeaders() {
     return { Authorization: "Bearer " + token };
   }
@@ -254,7 +264,7 @@ JS = r"""
     const turn = turns[0];
     const named = turns.find((item) => item.name);
     if (turn.preserved) return { label: named ? named.name + " · Earlier label" : "Earlier label", cls: "preserved", interactive: true };
-    if (turn.person_id && named) return { label: named.name + " · Confirmed", cls: "confirmed", interactive: true };
+    if (turn.person_id && named) return { label: named.name + " ✓", cls: "confirmed", interactive: true };
     if (turn.suggested_name) return { label: "Possibly " + turn.suggested_name, cls: "suggested", interactive: true };
     return { label: "Unknown · " + key, cls: "unknown", interactive: true };
   }
@@ -377,95 +387,171 @@ JS = r"""
       }
     });
   }
-  function identityEditor(group) {
-    const box = document.createElement("form");
-    box.className = "identity";
-    box.setAttribute("data-identity-editor", "true");
-    const heading = document.createElement("h3");
-    heading.textContent = "Identify this speaker";
-    const scope = document.createElement("p");
-    scope.className = "meta";
-    scope.textContent = group.preserved
-      ? "Earlier confirmed label kept from a previous speaker pass."
-      : "Applies to this speaker in this recording only.";
-    const state = groupLabel(group);
-    const badge = document.createElement("span");
-    badge.className = "badge " + state.cls;
-    badge.textContent = state.label;
-    const picker = document.createElement("select");
-    picker.setAttribute("aria-label", "Choose a person");
-    const blank = document.createElement("option");
-    blank.value = "";
-    blank.textContent = "Choose a person…";
-    picker.appendChild(blank);
-    for (const person of (payload.people || [])) {
-      const option = document.createElement("option");
-      option.value = person.id;
-      option.textContent = person.name;
-      picker.appendChild(option);
+  function currentPersonId(group) {
+    const named = (group.turns || []).find((turn) => turn.person_id);
+    return named ? named.person_id : "";
+  }
+  function actionLabel(group, personId) {
+    if (!personId) return "Assign";
+    if ((group.turns || []).some((turn) => turn.person_id === personId)) return "Change";
+    if ((group.turns || []).some((turn) => turn.suggested_person_id === personId || turn.suggested_name)) return "Confirm";
+    return "Assign";
+  }
+  function closePopover(restoreFocus) {
+    const key = openIdentityKey;
+    openIdentityKey = null;
+    identityDraft = null;
+    identityMode = "list";
+    identitySample = false;
+    createdPersonId = null;
+    createdPersonKey = null;
+    createdPersonName = null;
+    identityNewName = "";
+    render();
+    if (restoreFocus && key) {
+      const pill = document.querySelector('[data-identity-key="' + key + '"]');
+      if (pill) pill.focus();
     }
-    const create = document.createElement("option");
-    create.value = "__new__";
-    create.textContent = "New person…";
-    picker.appendChild(create);
-    const newName = document.createElement("input");
-    newName.type = "text";
-    newName.placeholder = "New person name";
-    newName.hidden = true;
-    const sample = document.createElement("label");
-    const sampleBox = document.createElement("input");
-    sampleBox.type = "checkbox";
-    sample.appendChild(sampleBox);
-    sample.append(" Also save as a voice sample if this clip is long enough");
-    const save = document.createElement("button");
-    save.type = "submit";
-    save.textContent = group.turns.some((turn) => turn.person_id) ? "Change" : (group.turns.some((turn) => turn.suggested_name) ? "Confirm" : "Identify");
-    save.disabled = true;
+  }
+  function applyIdentity(group, personId, useSample) {
+    const turn = group.turns[0];
+    if (!turn) return Promise.reject(new Error("turn"));
+    const same = personId && personId === currentPersonId(group);
+    if (same && !useSample) {
+      closePopover(true);
+      return Promise.resolve();
+    }
+    return fetch("/v1/turns/" + turn.id + "/label", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ person_id: personId, use_sample: !!useSample })
+    }).then((response) => {
+      if (!response.ok) throw new Error("label");
+      createdPersonId = null;
+      identityDraft = null;
+      identityMode = "list";
+      identitySample = false;
+      openIdentityKey = null;
+      return loadDay();
+    });
+  }
+  function identityPopover(group) {
+    const box = document.createElement("div");
+    box.className = "popover";
+    box.setAttribute("data-identity-editor", "true");
+    box.setAttribute("role", "dialog");
+    box.setAttribute("aria-label", "Identify speaker");
+    box.addEventListener("click", (event) => event.stopPropagation());
     const note = document.createElement("p");
     note.className = "meta";
     note.setAttribute("aria-live", "polite");
-    const why = (group.turns[0] && group.turns[0].suggestion_reasons || []).filter((code) => code !== "matched" && code !== "confirmed");
-    if (group.turns[0] && group.turns[0].suggested_name) {
-      note.textContent = "Suggested: " + group.turns[0].suggested_name;
-    } else if (why.length) {
-      note.textContent = why.map(reasonText).join(". ");
+    const sampleDetails = document.createElement("details");
+    const sampleSummary = document.createElement("summary");
+    sampleSummary.textContent = "Voice learning";
+    const sample = document.createElement("label");
+    const sampleBox = document.createElement("input");
+    sampleBox.type = "checkbox";
+    sampleBox.checked = identitySample;
+    sample.appendChild(sampleBox);
+    sample.append(" Save a voice sample from this clip only if it is long enough");
+    sampleBox.addEventListener("change", () => {
+      identitySample = sampleBox.checked;
+      if (identityMode !== "new") render();
+    });
+    sampleDetails.appendChild(sampleSummary);
+    sampleDetails.appendChild(sample);
+    const footer = document.createElement("div");
+    footer.className = "popover-footer";
+    function currentId() { return currentPersonId(group); }
+    function draftChanged() {
+      return identityDraft && identityDraft !== currentId();
     }
-    picker.addEventListener("change", () => {
-      newName.hidden = picker.value !== "__new__";
-      save.disabled = !picker.value;
-    });
-    box.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      if (!picker.value) return;
-      save.disabled = true;
-      note.textContent = "Saving…";
-      try {
-        let personId = picker.value;
-        if (personId === "__new__") {
-          const name = (newName.value || "").trim();
-          if (!name) { note.textContent = "Enter a name first."; save.disabled = false; return; }
-          const created = await fetch("/v1/people", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ name }) });
-          if (!created.ok) throw new Error("create");
-          const person = await created.json();
-          personId = person.id;
+    if (identityMode === "new") {
+      const name = document.createElement("input");
+      name.type = "text";
+      name.placeholder = "Name";
+      name.value = identityNewName;
+      name.setAttribute("aria-label", "New person name");
+      name.addEventListener("input", () => { identityNewName = name.value; });
+      const back = document.createElement("button");
+      back.type = "button";
+      back.textContent = "Back";
+      back.addEventListener("click", () => { identityMode = "list"; identityNewName = ""; render(); });
+      const create = document.createElement("button");
+      create.type = "button";
+      create.textContent = "Create & assign";
+      create.addEventListener("click", async () => {
+        const value = (name.value || "").trim();
+        if (!value) { note.textContent = "Enter a name first."; return; }
+        note.textContent = "Saving…";
+        try {
+          create.disabled = true;
+          let personId = createdPersonKey === group.key && createdPersonName === value ? createdPersonId : null;
+          if (!personId) {
+            const created = await fetch("/v1/people", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ name: value }) });
+            if (!created.ok) throw new Error("create");
+            const person = await created.json();
+            personId = person.id;
+            createdPersonId = personId;
+            createdPersonKey = group.key;
+            createdPersonName = value;
+            payload.people = (payload.people || []).concat([person]);
+          }
+          await applyIdentity(group, personId, identitySample);
+        } catch (error) {
+          note.textContent = "Could not save that identity.";
+          create.disabled = false;
         }
-        const turn = group.turns[0];
-        const saved = await fetch("/v1/turns/" + turn.id + "/label", { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify({ person_id: personId, use_sample: sampleBox.checked }) });
-        if (!saved.ok) throw new Error("label");
-        note.textContent = "Saved.";
-        loadDay();
-      } catch (error) {
-        note.textContent = "Could not save that identity.";
-        save.disabled = false;
-      }
-    });
-    box.appendChild(heading);
-    box.appendChild(badge);
-    box.appendChild(scope);
-    box.appendChild(picker);
-    box.appendChild(newName);
-    box.appendChild(sample);
-    box.appendChild(save);
+      });
+      footer.appendChild(back);
+      footer.appendChild(create);
+      box.appendChild(name);
+      box.appendChild(sampleDetails);
+      box.appendChild(footer);
+      box.appendChild(note);
+      setTimeout(() => name.focus(), 0);
+      return box;
+    }
+    for (const person of (payload.people || [])) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "person-option";
+      row.setAttribute("aria-pressed", String((identityDraft || currentId()) === person.id));
+      row.textContent = person.name;
+      row.addEventListener("click", () => {
+        identityDraft = person.id;
+        render();
+        setTimeout(() => {
+          const save = document.querySelector(".popover-footer button:last-child");
+          if (save) save.focus();
+        }, 0);
+      });
+      box.appendChild(row);
+    }
+    const create = document.createElement("button");
+    create.type = "button";
+    create.className = "person-option";
+    create.textContent = "New person";
+    create.addEventListener("click", () => { identityMode = "new"; identityDraft = null; identityNewName = ""; render(); });
+    box.appendChild(create);
+    box.appendChild(sampleDetails);
+    if (draftChanged() || (identitySample && currentId())) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => closePopover(true));
+      const save = document.createElement("button");
+      save.type = "button";
+      save.textContent = draftChanged() ? actionLabel(group, identityDraft) : "Save voice sample";
+      save.addEventListener("click", async () => {
+        note.textContent = "Saving…";
+        try { await applyIdentity(group, draftChanged() ? identityDraft : currentId(), identitySample); }
+        catch (error) { note.textContent = "Could not save that identity."; }
+      });
+      footer.appendChild(cancel);
+      footer.appendChild(save);
+      box.appendChild(footer);
+    }
     box.appendChild(note);
     return box;
   }
@@ -504,10 +590,6 @@ JS = r"""
     const speakers = document.createElement("div");
     speakers.className = "speakers";
     speakers.setAttribute("aria-label", "Speakers");
-    const speakersLabel = document.createElement("span");
-    speakersLabel.className = "speakers-label";
-    speakersLabel.textContent = groups.length === 1 ? "Speaker" : "Speakers";
-    speakers.appendChild(speakersLabel);
     if (!groups.length) {
       const empty = document.createElement("span");
       empty.className = "badge unknown pill";
@@ -517,30 +599,38 @@ JS = r"""
     }
     for (const group of groups) {
       const info = groupLabel(group);
+      const anchor = document.createElement("div");
+      anchor.className = "identity-anchor";
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "badge pill " + info.cls;
       pill.textContent = info.label;
+      pill.setAttribute("data-identity-key", group.key);
       pill.setAttribute("aria-expanded", String(openIdentityKey === group.key));
-      pill.setAttribute("aria-label", "Speaker " + (group.speaker_key || "unknown") + ": " + info.label);
-      pill.addEventListener("click", () => {
-        openIdentityKey = openIdentityKey === group.key ? null : group.key;
-        focusIdentity = !!openIdentityKey;
+      pill.setAttribute("aria-haspopup", "dialog");
+      pill.setAttribute("aria-label", info.label);
+      pill.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (openIdentityKey === group.key) { closePopover(true); return; }
+        openIdentityKey = group.key;
+        identityDraft = currentPersonId(group) || null;
+        identityMode = "list";
+        identitySample = false;
+        createdPersonId = null;
+        createdPersonKey = null;
+        createdPersonName = null;
+        identityNewName = "";
         render();
+        setTimeout(() => {
+          const first = document.querySelector(".popover .person-option");
+          if (first) first.focus();
+        }, 0);
       });
-      speakers.appendChild(pill);
+      anchor.appendChild(pill);
+      if (openIdentityKey === group.key) anchor.appendChild(identityPopover(group));
+      speakers.appendChild(anchor);
     }
     pane.appendChild(speakers);
-    const openGroup = groups.find((group) => group.key === openIdentityKey);
-    if (openGroup) {
-      const editor = identityEditor(openGroup);
-      pane.appendChild(editor);
-      if (focusIdentity) {
-        const picker = editor.querySelector("select");
-        if (picker) picker.focus();
-        focusIdentity = false;
-      }
-    }
     pane.appendChild(modes);
     if (detailMode === "transcript") {
       const body = document.createElement("p");
@@ -644,6 +734,20 @@ JS = r"""
     renderList();
     renderDetail();
   }
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && openIdentityKey) {
+      event.preventDefault();
+      closePopover(true);
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (!openIdentityKey) return;
+    const pop = document.querySelector(".popover");
+    const pill = document.querySelector('[data-identity-key="' + openIdentityKey + '"]');
+    if (pop && pop.contains(event.target)) return;
+    if (pill && pill.contains(event.target)) return;
+    closePopover(true);
+  });
   tabRecordings.addEventListener("click", () => setView("recordings"));
   tabPeople.addEventListener("click", () => setView("people"));
   document.getElementById("refresh").addEventListener("click", loadDay);

@@ -482,7 +482,7 @@ class PersistenceAndViewerTests(unittest.TestCase):
                 self.assertEqual(status, 200)
                 self.assertIn("textContent", viewer_mod.JS)
                 self.assertNotIn("innerHTML", viewer_mod.JS)
-                self.assertIn("Choose a person…", viewer_mod.JS)
+                self.assertIn("data-identity-editor", viewer_mod.JS)
                 self.assertIn("data-identity-editor", viewer_mod.JS)
                 self.assertIn("tab-recordings", viewer_mod.APP)
                 self.assertIn("tab-people", viewer_mod.APP)
@@ -976,19 +976,22 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(any(turn.get("preserved") and turn.get("person_id") == person["id"] for turn in turns))
 
     def test_identity_editor_starts_empty_for_zero_or_one_person(self):
-        self.assertIn('blank.textContent = "Choose a person…"', viewer_mod.JS)
-        self.assertIn("save.disabled = true", viewer_mod.JS)
         self.assertIn("No people yet", viewer_mod.JS)
         self.assertNotIn("if (person.id === turn.person_id) option.selected = true", viewer_mod.JS)
+        self.assertNotIn("speakers-label", viewer_mod.JS)
+        self.assertIn('named.name + " ✓"', viewer_mod.JS)
         self.assertIn('Unknown · " + key', viewer_mod.JS)
         self.assertIn("Possibly ", viewer_mod.JS)
-        self.assertIn(" · Confirmed", viewer_mod.JS)
         self.assertIn(" · Earlier label", viewer_mod.JS)
         self.assertIn("Mixed labels", viewer_mod.JS)
         self.assertIn("Unknown · No speaker turns available", viewer_mod.JS)
         self.assertIn("aria-expanded", viewer_mod.JS)
+        self.assertIn("Create & assign", viewer_mod.JS)
+        self.assertIn("Save voice sample", viewer_mod.JS)
+        self.assertIn("New person", viewer_mod.JS)
+        self.assertIn("closePopover", viewer_mod.JS)
         self.assertIn("One more confirmed voice sample needed for ", viewer_mod.JS)
-        self.assertIn("speakers-label", viewer_mod.JS)
+        self.assertIn(".popover", viewer_mod.CSS)
 
 
 if __name__ == "__main__":

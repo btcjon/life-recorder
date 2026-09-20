@@ -164,7 +164,7 @@ JS = r"""
         const speaker = turn.name || (turn.suggested_name ? "Maybe " + turn.suggested_name : turn.speaker_key || "Unknown");
         part.textContent = speaker + " · " + turn.started.toFixed(1) + "–" + turn.ended.toFixed(1) + "s";
         if (turn.text) part.append(" — " + turn.text);
-        const label = document.createElement("button"); label.type = "button"; label.textContent = "Label";
+        const label = document.createElement("button"); label.type = "button"; label.textContent = "Label " + (turn.speaker_key || "speaker") + " in clip";
         label.addEventListener("click", async () => {
           const name = prompt("Speaker name (for example, Jon)"); if (!name) return;
           let person = (payload.people || []).find(p => p.name.toLowerCase() === name.toLowerCase());

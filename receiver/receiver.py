@@ -470,17 +470,25 @@ class Inbox:
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
             if not person or not turn:
                 return False
-            db.execute("UPDATE speaker_turns SET person_id=?,label_source='confirmed' WHERE id=?",
-                       (person_id, turn_id))
-            embedding = json.loads(turn["embedding_json"] or "null")
-            duration = float(turn["ended"]) - float(turn["started"])
-            if use_sample and isinstance(embedding, list) and duration >= 3:
-                db.execute("""INSERT INTO voice_samples
-                    (id,person_id,turn_id,embedding_json,duration,confirmed_at) VALUES(?,?,?,?,?,?)
-                    ON CONFLICT(turn_id) DO UPDATE SET person_id=excluded.person_id,
-                    embedding_json=excluded.embedding_json,duration=excluded.duration,
-                    confirmed_at=excluded.confirmed_at""",
-                    (str(uuid.uuid4()), person_id, turn_id, json.dumps(embedding), duration, time.time()))
+            matching = db.execute("""SELECT * FROM speaker_turns
+                WHERE chunk_id=? AND speaker_key=?""",
+                (turn["chunk_id"], turn["speaker_key"])).fetchall()
+            db.execute("""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
+                WHERE chunk_id=? AND speaker_key=?""",
+                (person_id, turn["chunk_id"], turn["speaker_key"]))
+            if use_sample:
+                for candidate in matching:
+                    embedding = json.loads(candidate["embedding_json"] or "null")
+                    duration = float(candidate["ended"]) - float(candidate["started"])
+                    if not isinstance(embedding, list) or duration < 3:
+                        continue
+                    db.execute("""INSERT INTO voice_samples
+                        (id,person_id,turn_id,embedding_json,duration,confirmed_at) VALUES(?,?,?,?,?,?)
+                        ON CONFLICT(turn_id) DO UPDATE SET person_id=excluded.person_id,
+                        embedding_json=excluded.embedding_json,duration=excluded.duration,
+                        confirmed_at=excluded.confirmed_at""",
+                        (str(uuid.uuid4()), person_id, candidate["id"],
+                         json.dumps(embedding), duration, time.time()))
         return True
 
 

@@ -56,11 +56,14 @@ final class ChunkWriter: @unchecked Sendable {
         let journalURL = QueueStore.directory.appendingPathComponent(name + ".recording.json")
         try JSONEncoder().encode(next).write(to: journalURL, options: .atomic)
         let outputURL = QueueStore.directory.appendingPathComponent(name + ".m4a")
+        let voiceBitRate = format.sampleRate >= 32000 ? 64000 : 32000
         file = try AVAudioFile(forWriting: outputURL, settings: [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: format.sampleRate,
             AVNumberOfChannelsKey: Int(format.channelCount),
-            AVEncoderBitRateKey: 32000 * Int(format.channelCount)
+            // 32 kbps produced audible metallic/warbled speech on real captures.
+            // 64 kbps mono remains compact while preserving voice identity cues.
+            AVEncoderBitRateKey: voiceBitRate * Int(format.channelCount)
         ], commonFormat: format.commonFormat, interleaved: format.isInterleaved)
         try FileManager.default.setAttributes([.protectionKey: FileProtectionType.completeUntilFirstUserAuthentication],
                                               ofItemAtPath: outputURL.path)

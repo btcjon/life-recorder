@@ -35,7 +35,7 @@ SESSION_GAP_SECONDS = 15 * 60
 DISPLAY_ZONE = ZoneInfo("America/New_York")
 RETENTION_SECONDS = 7 * 24 * 60 * 60
 MAX_RETENTION_SECONDS = 14 * 24 * 60 * 60
-MAX_RETAINED_BYTES = 2 * 1024 * 1024 * 1024
+MAX_RETAINED_BYTES = 4 * 1024 * 1024 * 1024
 
 
 def atomic_write(path: Path, data: bytes):
@@ -451,7 +451,20 @@ class Inbox:
 
     def people(self):
         with self.connect() as db:
-            return [dict(row) for row in db.execute("SELECT id,name FROM people ORDER BY name COLLATE NOCASE")]
+            rows = db.execute("""SELECT p.id,p.name,
+                COUNT(DISTINCT s.id) AS sample_count,
+                COUNT(DISTINCT t.chunk_id) AS clip_count,
+                COALESCE(SUM(s.duration),0) AS sample_seconds
+                FROM people p LEFT JOIN voice_samples s ON s.person_id=p.id
+                LEFT JOIN speaker_turns t ON t.id=s.turn_id
+                GROUP BY p.id,p.name ORDER BY p.name COLLATE NOCASE,p.id""").fetchall()
+        people = []
+        for row in rows:
+            item = dict(row)
+            item["enrollment_ready"] = (item["sample_count"] >= 3 and item["clip_count"] >= 2
+                                        and item["sample_seconds"] >= 20)
+            people.append(item)
+        return people
 
     def create_person(self, name: str):
         name = " ".join(str(name).split())[:100]
@@ -463,6 +476,15 @@ class Inbox:
             db.execute("INSERT INTO people(id,name,created_at,updated_at) VALUES(?,?,?,?)",
                        (person_id, name, now, now))
         return {"id": person_id, "name": name}
+
+    def rename_person(self, person_id: str, name: str):
+        name = " ".join(str(name).split())[:100]
+        if not name:
+            raise ValueError("Name required")
+        with self.connect() as db:
+            result = db.execute("UPDATE people SET name=?,updated_at=? WHERE id=?",
+                                (name, time.time(), person_id))
+        return {"id": person_id, "name": name} if result.rowcount else None
 
     def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
         with self.connect() as db:

@@ -1,6 +1,6 @@
 # Life Recorder
 
-A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 2 GiB) for playback and offline speaker diarization; selected clips can be kept longer. No paid transcription service or cloud backend is required.
+A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 4 GiB) for playback and offline speaker diarization; selected clips can be kept longer. No paid transcription service or cloud backend is required.
 
 The loopback-only Mac viewer supports transcript search, retained-audio playback, anonymous speaker turns, manual speaker naming, and opt-in voice samples. Voice-name suggestions appear only after at least three confirmed samples across two recordings and 20 seconds of speech, and always require human confirmation.
 

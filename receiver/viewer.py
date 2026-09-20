@@ -45,6 +45,7 @@ APP = """<!doctype html>
   <label>Day <input id="day" type="date"></label>
   <button id="refresh" type="button">Refresh</button>
   <label>Search <input id="search" type="search"></label>
+  <details><summary>People</summary><div id="people"></div></details>
 </header>
 <main>
   <aside id="list"></aside>
@@ -69,6 +70,7 @@ aside, section { padding: 12px 16px; overflow: auto; }
 .chunk { margin: 0 0 12px; }
 .meta { color: #555; font-size: 12px; }
 .turn { border-left: 3px solid #cfc8b8; padding-left: 8px; margin: 6px 0; }
+.person { display: flex; gap: 8px; align-items: center; padding: 4px 0; }
 audio { width: min(520px, 100%); display: block; margin: 6px 0; }
 #help { padding: 8px 16px; color: #444; }
 @media (max-width: 720px) { main { grid-template-columns: 1fr; } }
@@ -85,6 +87,7 @@ JS = r"""
   const list = document.getElementById("list");
   const pane = document.getElementById("pane");
   const search = document.getElementById("search");
+  const peoplePane = document.getElementById("people");
   let payload = null;
   let audioUrls = [];
   function authHeaders() {
@@ -115,6 +118,7 @@ JS = r"""
     const intervals = payload.intervals || [];
     const chunks = payload.chunks || [];
     const sessions = payload.sessions || [];
+    renderPeople();
     let quietHidden = 0;
     for (const item of intervals) {
       const node = document.createElement("div");
@@ -172,19 +176,26 @@ JS = r"""
         const turnEnd = Number.isFinite(Number(turn.ended)) ? Number(turn.ended).toFixed(1) : "?";
         part.textContent = speaker + " · " + turnStart + "–" + turnEnd + "s";
         if (turn.text) part.append(" — " + turn.text);
-        const label = document.createElement("button"); label.type = "button"; label.textContent = "Label " + (turn.speaker_key || "speaker") + " in clip";
+        const picker = document.createElement("select");
+        for (const person of (payload.people || [])) {
+          const option = document.createElement("option"); option.value = person.id; option.textContent = person.name;
+          if (person.id === turn.person_id) option.selected = true; picker.appendChild(option);
+        }
+        const create = document.createElement("option"); create.value = "__new__"; create.textContent = "+ New person…"; picker.appendChild(create);
+        const label = document.createElement("button"); label.type = "button"; label.textContent = "Assign " + (turn.speaker_key || "speaker");
         label.addEventListener("click", async () => {
-          const name = prompt("Speaker name (for example, Jon)"); if (!name) return;
-          let person = (payload.people || []).find(p => p.name.toLowerCase() === name.toLowerCase());
-          if (!person) {
+          let person = (payload.people || []).find(p => p.id === picker.value);
+          if (picker.value === "__new__") {
+            const name = prompt("New person name"); if (!name) return;
             const created = await fetch("/v1/people", {method:"POST",headers:{...authHeaders(),"Content-Type":"application/json"},body:JSON.stringify({name})});
-            if (!created.ok) return; person = await created.json(); payload.people.push(person);
+            if (!created.ok) return; person = await created.json();
           }
+          if (!person) return;
           const sample = confirm("Use this confirmed turn as a voice sample when it is long enough?");
           const saved = await fetch("/v1/turns/" + turn.id + "/label", {method:"POST",headers:{...authHeaders(),"Content-Type":"application/json"},body:JSON.stringify({person_id:person.id,use_sample:sample})});
           if (saved.ok) loadDay();
         });
-        part.append(" "); part.appendChild(label);
+        part.append(" "); part.appendChild(picker); part.append(" "); part.appendChild(label);
         node.appendChild(part);
       }
       pane.appendChild(node);
@@ -194,6 +205,22 @@ JS = r"""
     pending.textContent = "Pending " + (payload.pending || 0) + ", errors " + (payload.errors || 0) +
       (quietHidden ? ", quiet clips hidden " + quietHidden : "") + ". Speaker labels remain anonymous until confirmed.";
     pane.appendChild(pending);
+  }
+  function renderPeople() {
+    peoplePane.replaceChildren();
+    for (const person of (payload.people || [])) {
+      const row = document.createElement("div"); row.className = "person";
+      const label = document.createElement("span");
+      label.textContent = person.name + " · " + (person.sample_count || 0) + " samples / " +
+        (person.clip_count || 0) + " clips" + (person.enrollment_ready ? " · ready" : " · learning");
+      const rename = document.createElement("button"); rename.type = "button"; rename.textContent = "Rename";
+      rename.addEventListener("click", async () => {
+        const name = prompt("Rename " + person.name, person.name); if (!name || name === person.name) return;
+        const response = await fetch("/v1/people/" + person.id, {method:"POST",headers:{...authHeaders(),"Content-Type":"application/json"},body:JSON.stringify({name})});
+        if (response.ok) loadDay();
+      });
+      row.appendChild(label); row.appendChild(rename); peoplePane.appendChild(row);
+    }
   }
   document.getElementById("refresh").addEventListener("click", loadDay);
   day.addEventListener("change", loadDay);
@@ -336,6 +363,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 return self._json(201, self._inbox().create_person(body.get("name", "")))
             except ValueError:
                 return self._json(400, {"error": "Invalid name"})
+        if path.startswith("/v1/people/"):
+            try:
+                person = self._inbox().rename_person(path.removeprefix("/v1/people/"), body.get("name", ""))
+            except ValueError:
+                return self._json(400, {"error": "Invalid name"})
+            return self._json(200, person) if person else self._json(404, {"error": "Person unavailable"})
         if path.startswith("/v1/turns/") and path.endswith("/label"):
             turn_id = path[len("/v1/turns/"):-len("/label")]
             if self._inbox().label_turn(turn_id, body.get("person_id", ""), bool(body.get("use_sample"))):

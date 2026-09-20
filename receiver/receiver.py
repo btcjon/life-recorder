@@ -419,7 +419,7 @@ class Inbox:
             if not item["person_id"] and isinstance(embedding, list):
                 ranked = sorted(((cosine(embedding, profile["centroid"]), profile)
                                  for profile in profiles), reverse=True, key=lambda pair: pair[0])
-                if ranked and ranked[0][0] >= 0.85 and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.10):
+                if ranked and ranked[0][0] >= 0.60 and (len(ranked) == 1 or ranked[0][0] - ranked[1][0] >= 0.10):
                     item["suggested_person_id"] = ranked[0][1]["id"]
                     item["suggested_name"] = ranked[0][1]["name"]
                     item["suggestion_score"] = round(ranked[0][0], 3)
@@ -434,7 +434,8 @@ class Inbox:
         grouped = {}
         for row in rows:
             embedding = json.loads(row["embedding_json"])
-            if not isinstance(embedding, list) or not embedding:
+            if (not isinstance(embedding, list) or len(embedding) != 128
+                    or not all(math.isfinite(float(value)) for value in embedding)):
                 continue
             entry = grouped.setdefault(row["person_id"], {"id": row["person_id"], "name": row["name"],
                                                            "vectors": [], "chunks": set(), "seconds": 0.0})
@@ -444,8 +445,7 @@ class Inbox:
         for entry in grouped.values():
             if len(entry["vectors"]) < 3 or len(entry["chunks"]) < 2 or entry["seconds"] < 20:
                 continue
-            width = min(len(vector) for vector in entry["vectors"])
-            centroid = [sum(vector[i] for vector in entry["vectors"]) / len(entry["vectors"]) for i in range(width)]
+            centroid = [sum(vector[i] for vector in entry["vectors"]) / len(entry["vectors"]) for i in range(128)]
             profiles.append({"id": entry["id"], "name": entry["name"], "centroid": centroid})
         return profiles
 
@@ -476,30 +476,40 @@ class Inbox:
             db.execute("""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
                 WHERE chunk_id=? AND speaker_key=?""",
                 (person_id, turn["chunk_id"], turn["speaker_key"]))
+            turn_ids = [candidate["id"] for candidate in matching]
+            placeholders = ",".join("?" for _ in turn_ids)
+            db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
             if use_sample:
-                for candidate in matching:
-                    embedding = json.loads(candidate["embedding_json"] or "null")
-                    duration = float(candidate["ended"]) - float(candidate["started"])
-                    if not isinstance(embedding, list) or duration < 3:
-                        continue
+                vectors = [json.loads(candidate["embedding_json"] or "null") for candidate in matching]
+                vectors = [vector for vector in vectors if isinstance(vector, list) and vector]
+                duration = sum(max(0.0, float(candidate["ended"]) - float(candidate["started"]))
+                               for candidate in matching)
+                if vectors and duration >= 3:
+                    if any(len(vector) != 128 or not all(math.isfinite(float(value)) for value in vector)
+                           for vector in vectors):
+                        return True
+                    centroid = [sum(float(vector[index]) for vector in vectors) / len(vectors)
+                                for index in range(128)]
+                    norm = math.sqrt(sum(value ** 2 for value in centroid))
+                    if norm:
+                        centroid = [value / norm for value in centroid]
                     db.execute("""INSERT INTO voice_samples
-                        (id,person_id,turn_id,embedding_json,duration,confirmed_at) VALUES(?,?,?,?,?,?)
-                        ON CONFLICT(turn_id) DO UPDATE SET person_id=excluded.person_id,
-                        embedding_json=excluded.embedding_json,duration=excluded.duration,
-                        confirmed_at=excluded.confirmed_at""",
-                        (str(uuid.uuid4()), person_id, candidate["id"],
-                         json.dumps(embedding), duration, time.time()))
+                        (id,person_id,turn_id,embedding_json,duration,confirmed_at)
+                        VALUES(?,?,?,?,?,?)""",
+                        (str(uuid.uuid4()), person_id, matching[0]["id"],
+                         json.dumps(centroid), duration, time.time()))
         return True
 
 
 def cosine(left, right):
-    if not left or not right:
+    if len(left or []) != 128 or len(right or []) != 128:
         return -1.0
-    width = min(len(left), len(right))
     try:
-        dot = sum(float(left[i]) * float(right[i]) for i in range(width))
-        a = math.sqrt(sum(float(left[i]) ** 2 for i in range(width)))
-        b = math.sqrt(sum(float(right[i]) ** 2 for i in range(width)))
+        if not all(math.isfinite(float(value)) for value in list(left) + list(right)):
+            return -1.0
+        dot = sum(float(left[i]) * float(right[i]) for i in range(128))
+        a = math.sqrt(sum(float(left[i]) ** 2 for i in range(128)))
+        b = math.sqrt(sum(float(right[i]) ** 2 for i in range(128)))
     except (TypeError, ValueError, OverflowError):
         return -1.0
     return dot / (a * b) if a and b else -1.0

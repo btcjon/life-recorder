@@ -14,7 +14,7 @@ from urllib.parse import urlparse
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; "
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 LAUNCHER = """#!/bin/zsh
@@ -75,14 +75,18 @@ audio { width: min(520px, 100%); display: block; margin: 6px 0; }
 """
 JS = r"""
 (() => {
-  let token = location.hash.replace(/^#/, "");
-  if (token) history.replaceState(null, "", location.pathname);
+  let token = location.hash.replace(/^#/, "") || sessionStorage.getItem("life-recorder-token") || "";
+  if (location.hash) {
+    sessionStorage.setItem("life-recorder-token", token);
+    history.replaceState(null, "", location.pathname);
+  }
   const status = document.getElementById("status");
   const day = document.getElementById("day");
   const list = document.getElementById("list");
   const pane = document.getElementById("pane");
   const search = document.getElementById("search");
   let payload = null;
+  let audioUrls = [];
   function authHeaders() {
     return { Authorization: "Bearer " + token };
   }
@@ -103,6 +107,8 @@ JS = r"""
   }
   function render() {
     if (!payload) return;
+    for (const url of audioUrls) URL.revokeObjectURL(url);
+    audioUrls = [];
     const query = (search.value || "").toLowerCase();
     list.replaceChildren();
     pane.replaceChildren();
@@ -147,7 +153,7 @@ JS = r"""
         const audio = document.createElement("audio");
         audio.controls = true;
         fetch("/v1/audio/" + chunk.id, {headers: authHeaders()}).then(r => r.blob()).then(blob => {
-          audio.src = URL.createObjectURL(blob);
+          const objectUrl = URL.createObjectURL(blob); audioUrls.push(objectUrl); audio.src = objectUrl;
         });
         const keep = document.createElement("button");
         keep.type = "button"; keep.textContent = chunk.audio_pinned ? "Kept" : "Keep audio";
@@ -162,7 +168,9 @@ JS = r"""
       for (const turn of turns) {
         const part = document.createElement("div"); part.className = "turn";
         const speaker = turn.name || (turn.suggested_name ? "Maybe " + turn.suggested_name : turn.speaker_key || "Unknown");
-        part.textContent = speaker + " · " + turn.started.toFixed(1) + "–" + turn.ended.toFixed(1) + "s";
+        const turnStart = Number.isFinite(Number(turn.started)) ? Number(turn.started).toFixed(1) : "?";
+        const turnEnd = Number.isFinite(Number(turn.ended)) ? Number(turn.ended).toFixed(1) : "?";
+        part.textContent = speaker + " · " + turnStart + "–" + turnEnd + "s";
         if (turn.text) part.append(" — " + turn.text);
         const label = document.createElement("button"); label.type = "button"; label.textContent = "Label " + (turn.speaker_key || "speaker") + " in clip";
         label.addEventListener("click", async () => {

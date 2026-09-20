@@ -2,10 +2,29 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import time
 import uuid
 from pathlib import Path
+
+
+def _normalized_mean(vectors):
+    normalized = []
+    for vector in vectors:
+        try:
+            if len(vector) != 128 or not all(math.isfinite(float(value)) for value in vector):
+                continue
+            norm = sum(float(value) ** 2 for value in vector) ** 0.5
+            if norm:
+                normalized.append([float(value) / norm for value in vector])
+        except (TypeError, ValueError, OverflowError):
+            continue
+    if not normalized:
+        return None
+    mean = [sum(vector[index] for vector in normalized) / len(normalized) for index in range(128)]
+    norm = sum(value ** 2 for value in mean) ** 0.5
+    return [value / norm for value in mean] if norm else None
 
 
 def process_chunk(row, cli: Path, ffmpeg: str, work: Path) -> dict:
@@ -29,13 +48,26 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path) -> dict:
         payload = json.loads(result.read_text())
         if not isinstance(payload.get("segments"), list):
             raise ValueError("Malformed diarization output")
+        exported = json.loads(embeddings.read_text())
+        if not isinstance(exported, list):
+            raise ValueError("Malformed embedding export")
+        # FluidAudio's final S1/S2 identity is cluster+1. speakerIndex is only
+        # an internal window slot and is not stable across the recording.
+        by_speaker = {}
+        for item in exported:
+            cluster = item.get("cluster")
+            vector = item.get("rho128")
+            if isinstance(cluster, int) and isinstance(vector, list):
+                by_speaker.setdefault(f"S{cluster + 1}", []).append(vector)
+        centroids = {speaker: _normalized_mean(vectors) for speaker, vectors in by_speaker.items()}
         turns = []
         for item in payload["segments"][:10000]:
             start = float(item["startTimeSeconds"]); end = float(item["endTimeSeconds"])
-            embedding = item.get("embedding")
+            speaker_key = str(item.get("speakerId") or "Unknown")
+            embedding = centroids.get(speaker_key)
             if start < 0 or end <= start or end > float(row["duration"]) + 2:
                 raise ValueError("Invalid diarization timing")
-            turns.append({"speaker_key": str(item.get("speakerId") or "Unknown"),
+            turns.append({"speaker_key": speaker_key,
                           "started": start, "ended": end,
                           "quality": float(item.get("qualityScore") or 0),
                           "embedding": embedding if isinstance(embedding, list) else None})

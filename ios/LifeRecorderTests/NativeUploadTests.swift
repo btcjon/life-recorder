@@ -43,4 +43,26 @@ final class NativeUploadTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: chunk.manifestURL.path), manager.status)
         XCTAssertFalse(FileManager.default.fileExists(atPath: chunk.audioURL.path), "Delete local audio only after a durable receipt")
     }
+
+    func testReceiverSettingsStayHTTPSAndRejectBadPin() {
+        XCTAssertThrowsError(try ReceiverSettings.save(url: "http://your-mac.example.ts.net:8766",
+                                                       token: "token", pin: String(repeating: "a", count: 64)))
+        XCTAssertThrowsError(try ReceiverSettings.save(url: "https://your-mac.example.ts.net:8766",
+                                                       token: "token", pin: "not-a-fingerprint"))
+    }
+
+    func testATSExceptionIsExactTailscaleHostWithoutArbitraryLoads() throws {
+        let url = Bundle(for: UploadManager.self).url(forResource: "Info", withExtension: "plist")
+            ?? Bundle.main.url(forResource: "Info", withExtension: "plist")
+        let data = try Data(contentsOf: try XCTUnwrap(url))
+        let plist = try XCTUnwrap(PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any])
+        let ats = try XCTUnwrap(plist["NSAppTransportSecurity"] as? [String: Any])
+        XCTAssertNil(ats["NSAllowsArbitraryLoads"])
+        let domains = try XCTUnwrap(ats["NSExceptionDomains"] as? [String: Any])
+        XCTAssertEqual(Array(domains.keys), ["your-mac.example.ts.net"])
+        let exception = try XCTUnwrap(domains["your-mac.example.ts.net"] as? [String: Any])
+        XCTAssertEqual(exception["NSIncludesSubdomains"] as? Bool, false)
+        XCTAssertEqual(exception["NSExceptionMinimumTLSVersion"] as? String, "TLSv1.2")
+        XCTAssertEqual(exception["NSExceptionAllowsInsecureHTTPLoads"] as? Bool, true)
+    }
 }

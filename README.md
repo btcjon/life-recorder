@@ -1,12 +1,12 @@
 # Life Recorder
 
-A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally with Whisper and maintains one continuous Markdown transcript with hourly markers. Audio is deleted after durable receipt and successful transcription. No paid transcription service or cloud backend is required.
+A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Audio is deleted after durable receipt and successful transcription. No paid transcription service or cloud backend is required.
 
 ## Requirements
 
 - macOS with Xcode and an Apple developer account capable of installing a development build on the iPhone
 - iPhone running a supported iOS version, with Developer Mode enabled for development installation
-- Python 3.10+, `ffmpeg`, `whisper-cli` from whisper.cpp, and a downloaded GGML Whisper model
+- Python 3.10+, `ffmpeg`, `whisper-cli` from whisper.cpp, and a downloaded GGML Whisper model. Optional: a project-local `.transcription-venv` with `mlx-whisper` for an Apple Silicon experiment, not the default receiver.
 - A reachable HTTPS path between phone and Mac (same LAN by default; use a private VPN for cellular access)
 
 ## Build and install
@@ -22,6 +22,11 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
   DEVELOPMENT_TEAM=YOUR_TEAM_ID build
 ```
 
+Before building for a private Tailscale hostname, replace the example
+`your-mac.example.ts.net` key in `ios/LifeRecorder/Info.plist` with the exact
+hostname used by the pairing URL. Keep the exception exact-host, HTTPS-only,
+TLS 1.2 or newer, and continue using the app's certificate pin.
+
 ## Configure the Mac receiver
 
 ```sh
@@ -33,13 +38,21 @@ python3 receiver/setup.py \
 
 Setup creates a random bearer token, a self-signed TLS certificate, and a private pairing page in the data directory. Open that page only on the intended iPhone. The token is stored in the iPhone Keychain and in the private Mac runtime; it is ignored by Git. The receiver binds an authenticated upload endpoint and does not expose transcript downloads or arbitrary Mac access.
 
-The receiver writes the combined transcript to `life.md` in the data directory. It can be placed anywhere, including `~/Documents/life.md`, by moving that file and leaving a symlink at the runtime path.
+The receiver writes the combined transcript to `life.md`, daily Markdown files to `days/`, and its private SQLite ledger to `inbox.sqlite3` in the data directory. Runtime audio, transcripts, credentials, models, and databases stay outside the Git repository.
+
+## Mac viewer
+
+The receiver also serves a loopback-only authenticated viewer at `http://127.0.0.1:8767`. Open `open-viewer.command` from the private data directory to launch it without copying its token into the browser history. The viewer provides a day picker, transcript search, capture sessions, meeting/event hints, and pending/error counts.
+
+The viewer lists captured chunks and transcripts, but it cannot play completed audio because the receiver deletes audio after successful transcription. Changing that behavior requires an explicit retention policy and additional private storage.
 
 ## Recording behavior
 
 Tap the recorder switch once. Recording continues while the screen is locked and while other apps are used. If the iPhone is rebooted or the app is force-quit, iOS requires opening Life Recorder once before microphone capture can resume. Pending audio remains on the phone until the receiver acknowledges it. Upload tasks are retried and stale connectivity tasks are cancelled so they cannot hold the queue indefinitely.
 
-Whisper runs locally on the Mac. The receiver removes common stage-direction markers and highly repetitive hallucinated noise, then writes one continuous document with an hourly capture marker. This is cleanup, not a guarantee of perfect transcription.
+The recorder pauses automatically from 10:00 PM to 5:00 AM America/New_York and resumes at 5:00 AM while the app remains in memory. iOS can still require one manual open after a reboot or force-quit.
+
+The receiver supports local Whisper, MLX Whisper, and FluidAudio Parakeet engines. This installation uses FluidAudio Parakeet; the receiver records engine/model provenance per clip. It removes common stage-direction markers and highly repetitive hallucinated noise, then writes Eastern hourly markers and session headings after 15 minutes without captured audio. Session breaks are capture-time gaps, not speaker identity. This is cleanup, not a guarantee of perfect transcription.
 
 ## Using Codex to reproduce the setup
 

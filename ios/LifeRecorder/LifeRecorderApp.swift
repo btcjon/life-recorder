@@ -23,11 +23,11 @@ struct LifeRecorderApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(recorder: recorder, uploads: uploads, showSettings: $showSettings)
-                .task { uploads.activate(); await recorder.resumeIfEnabled() }
+                .task { uploads.activate(); await recorder.applySchedule() }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         uploads.activate()
-                        Task { await recorder.resumeIfEnabled() }
+                        Task { await recorder.applySchedule() }
                     }
                 }
                 .onOpenURL { url in
@@ -95,7 +95,7 @@ struct ContentView: View {
                                 .foregroundStyle(.orange)
                         }
                     }
-                    Text("Records with the screen locked. After restarting the phone or force-quitting, open this app once to resume. Switching off stays off.")
+                    Text("Records with the screen locked. Pauses 10:00 PM-5:00 AM Eastern. After restarting the phone or force-quitting, open this app once to resume. Switching off stays off.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }.padding(24)
             }

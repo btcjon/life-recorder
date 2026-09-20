@@ -1,8 +1,10 @@
 import hashlib
 import http.client
 import json
+import os
 from pathlib import Path
 import socket
+import sqlite3
 import sys
 import tempfile
 import threading
@@ -10,6 +12,7 @@ import unittest
 import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "receiver"))
+import receiver as receiver_mod
 from receiver import Handler, Inbox, Receiver
 
 
@@ -83,6 +86,22 @@ class ReceiverTests(unittest.TestCase):
         self.assertEqual(status, 401)
         self.assertEqual(self.inbox.status(), {})
 
+    def test_session_headings_follow_capture_gaps(self):
+        _, _, first = self.upload(started="2026-09-10T16:00:00.000Z")
+        self.inbox.complete(first, "Morning room talk.")
+        _, _, same = self.upload(started="2026-09-10T16:08:00.000Z")
+        self.inbox.complete(same, "Still the same sitting.")
+        _, _, later = self.upload(started="2026-09-10T16:30:00.000Z")
+        self.inbox.complete(later, "After a long pause.")
+        text = (self.inbox.root / "life.md").read_text()
+        self.assertIn("Sessions split after 15 minutes without captured audio.", text)
+        self.assertIn("Speaker identity is not inferred yet.", text)
+        self.assertEqual(text.count("## Session 1"), 1)
+        self.assertEqual(text.count("## Session 2"), 1)
+        self.assertLess(text.index("## Session 1"), text.index("Morning room talk."))
+        self.assertLess(text.index("Still the same sitting."), text.index("## Session 2"))
+        self.assertLess(text.index("## Session 2"), text.index("After a long pause."))
+
     def test_offline_backlog_is_exported_by_capture_time(self):
         _, _, later = self.upload(started="2026-09-10T16:00:00.000Z")
         self.inbox.complete(later, "Later audio.")
@@ -92,6 +111,17 @@ class ReceiverTests(unittest.TestCase):
         self.assertLess(text.index("Earlier audio."), text.index("Later audio."))
         self.assertTrue((self.inbox.days / "2026-09-09.md").exists())
         self.assertTrue((self.inbox.days / "2026-09-10.md").exists())
+
+    def test_export_splits_sessions_after_fifteen_minute_gap(self):
+        _, _, first = self.upload(started="2026-09-10T12:00:00.000Z")
+        self.inbox.complete(first, "First conversation.")
+        _, _, second = self.upload(started="2026-09-10T12:10:00.000Z")
+        self.inbox.complete(second, "Same conversation.")
+        _, _, third = self.upload(started="2026-09-10T12:40:00.000Z")
+        self.inbox.complete(third, "New conversation.")
+        text = (self.inbox.days / "2026-09-10.md").read_text()
+        self.assertEqual(text.count("## Session "), 2)
+        self.assertIn("America/New_York", (self.inbox.root / "life.md").read_text())
 
     def test_untranscribed_audio_retained(self):
         _, _, chunk_id = self.upload()
@@ -125,6 +155,55 @@ class ReceiverTests(unittest.TestCase):
             response = client.recv(4096)
         self.assertIn(b"400", response)
         self.assertIsNone(self.inbox.receipt(chunk_id))
+
+
+    def _fd_count(self):
+        return len(os.listdir("/dev/fd"))
+
+    def test_repeated_connect_does_not_leak_fds(self):
+        before = self._fd_count()
+        for _ in range(80):
+            with self.inbox.connect() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM chunks").fetchone()[0], 0)
+        self.assertLessEqual(self._fd_count() - before, 4)
+
+    def test_connect_closes_after_pragma_exception(self):
+        opened = []
+        real_connect = receiver_mod.sqlite3.connect
+
+        class Stub:
+            def __init__(self):
+                self.closed = False
+                self.row_factory = None
+
+            def execute(self, sql, *args, **kwargs):
+                if str(sql).startswith("PRAGMA"):
+                    raise sqlite3.OperationalError("injected")
+                return self
+
+            def close(self):
+                self.closed = True
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+        def wrapped(*args, **kwargs):
+            db = Stub()
+            opened.append(db)
+            return db
+
+        receiver_mod.sqlite3.connect = wrapped
+        try:
+            with self.assertRaises(sqlite3.OperationalError):
+                with self.inbox.connect() as db:
+                    db.execute("SELECT 1")
+            self.assertEqual(len(opened), 1)
+            self.assertTrue(opened[0].closed)
+        finally:
+            receiver_mod.sqlite3.connect = real_connect
 
 
 if __name__ == "__main__":

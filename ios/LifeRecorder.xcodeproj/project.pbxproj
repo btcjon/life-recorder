@@ -14,6 +14,9 @@
 		8C34593B9CD5B393F7C90C6D /* NativeUploadTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73A0E11377963676F1DB20DB /* NativeUploadTests.swift */; };
 		C87128C9329B9A638C31BF46 /* RecorderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 93F1329E2C2FBAECB7B7FD74 /* RecorderTests.swift */; };
 		E84B72E8AEAE0DAE896AF8A6 /* Recorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B35B1754886B3F5500411113 /* Recorder.swift */; };
+		A11C01E70000000000000001 /* QuietHours.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C01E70000000000000011 /* QuietHours.swift */; };
+		A11C01E70000000000000002 /* QuietHoursTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C01E70000000000000012 /* QuietHoursTests.swift */; };
+		A11C01E70000000000000003 /* AudioRouting.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C01E70000000000000013 /* AudioRouting.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,15 +31,18 @@
 
 /* Begin PBXFileReference section */
 		1E138E288F79C8B5DE281250 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
-		1EE7061AC1E987E130601AC9 /* LifeRecorderTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = LifeRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		1EE7061AC1E987E130601AC9 /* LifeRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LifeRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		248F26ABAF4F063BA289ED46 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		39F3DBEC2972B9DED3119424 /* LifeRecorderApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeRecorderApp.swift; sourceTree = "<group>"; };
 		4912CAE16CD5C6C2B739463D /* UploadManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UploadManager.swift; sourceTree = "<group>"; };
 		73A0E11377963676F1DB20DB /* NativeUploadTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeUploadTests.swift; sourceTree = "<group>"; };
-		7C47086B1533C94C651B4CCF /* LifeRecorder.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LifeRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7C47086B1533C94C651B4CCF /* LifeRecorder.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeRecorder.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		93F1329E2C2FBAECB7B7FD74 /* RecorderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RecorderTests.swift; sourceTree = "<group>"; };
 		979FEA5285A0B5B0F31DCFD4 /* ChunkWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChunkWriter.swift; sourceTree = "<group>"; };
 		B35B1754886B3F5500411113 /* Recorder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Recorder.swift; sourceTree = "<group>"; };
+		A11C01E70000000000000011 /* QuietHours.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietHours.swift; sourceTree = "<group>"; };
+		A11C01E70000000000000012 /* QuietHoursTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuietHoursTests.swift; sourceTree = "<group>"; };
+		A11C01E70000000000000013 /* AudioRouting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioRouting.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -46,6 +52,8 @@
 				979FEA5285A0B5B0F31DCFD4 /* ChunkWriter.swift */,
 				248F26ABAF4F063BA289ED46 /* Info.plist */,
 				39F3DBEC2972B9DED3119424 /* LifeRecorderApp.swift */,
+				A11C01E70000000000000013 /* AudioRouting.swift */,
+				A11C01E70000000000000011 /* QuietHours.swift */,
 				B35B1754886B3F5500411113 /* Recorder.swift */,
 				1E138E288F79C8B5DE281250 /* Storage.swift */,
 				4912CAE16CD5C6C2B739463D /* UploadManager.swift */,
@@ -66,6 +74,7 @@
 			isa = PBXGroup;
 			children = (
 				73A0E11377963676F1DB20DB /* NativeUploadTests.swift */,
+				A11C01E70000000000000012 /* QuietHoursTests.swift */,
 				93F1329E2C2FBAECB7B7FD74 /* RecorderTests.swift */,
 			);
 			path = LifeRecorderTests;
@@ -125,7 +134,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1430;
+				LastUpgradeCheck = 2700;
 				TargetAttributes = {
 					B783F8B8E7C1A2E6020AAA56 = {
 						ProvisioningStyle = Automatic;
@@ -162,7 +171,9 @@
 			files = (
 				1F2B7EE6A773F6B72AC416FA /* ChunkWriter.swift in Sources */,
 				49B7E576C31EC0BB95B19780 /* LifeRecorderApp.swift in Sources */,
+				A11C01E70000000000000001 /* QuietHours.swift in Sources */,
 				E84B72E8AEAE0DAE896AF8A6 /* Recorder.swift in Sources */,
+				A11C01E70000000000000003 /* AudioRouting.swift in Sources */,
 				54662EB8B6B32A2F28B52B84 /* Storage.swift in Sources */,
 				066F079475FA4272323846E7 /* UploadManager.swift in Sources */,
 			);
@@ -173,6 +184,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				8C34593B9CD5B393F7C90C6D /* NativeUploadTests.swift in Sources */,
+				A11C01E70000000000000002 /* QuietHoursTests.swift in Sources */,
 				C87128C9329B9A638C31BF46 /* RecorderTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -216,7 +228,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.browseruse.liferecorder;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jonbennett.liferecorder;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -233,7 +245,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				PRODUCT_BUNDLE_IDENTIFIER = com.browseruse.liferecorder;
+				PRODUCT_BUNDLE_IDENTIFIER = co.jonbennett.liferecorder;
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
 			};
@@ -277,6 +289,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -290,6 +303,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				SWIFT_OPTIMIZATION_LEVEL = "-O";
 				SWIFT_VERSION = 5.0;
@@ -335,6 +349,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GCC_C_LANGUAGE_STANDARD = gnu11;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -355,6 +370,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 				SWIFT_VERSION = 5.0;

@@ -15,7 +15,7 @@ targets:
     sources: [LifeRecorder]
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.browseruse.liferecorder
+        PRODUCT_BUNDLE_IDENTIFIER: co.jonbennett.liferecorder
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: LifeRecorder/Info.plist
     scheme:

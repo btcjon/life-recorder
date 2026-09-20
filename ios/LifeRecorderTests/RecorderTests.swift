@@ -20,6 +20,55 @@ final class RecorderTests: XCTestCase {
         XCTAssertFalse(Recorder().enabled)
     }
 
+    func testCaptureSessionUsesA2DPMixingAndNotSpeakerOverride() {
+        XCTAssertEqual(AudioRouting.category, .playAndRecord)
+        XCTAssertEqual(AudioRouting.mode, .default)
+        XCTAssertTrue(AudioRouting.options.contains(.mixWithOthers))
+        XCTAssertTrue(AudioRouting.options.contains(.allowBluetoothA2DP))
+        XCTAssertTrue(AudioRouting.options.contains(.defaultToSpeaker))
+        XCTAssertFalse(AudioRouting.options.contains(.allowBluetooth))
+    }
+
+    func testSpeakerIsForcedOnlyWhenNoHeadphonesAreConnected() {
+        XCTAssertTrue(AudioRouting.shouldForceSpeaker(outputs: [.builtInReceiver]))
+        XCTAssertTrue(AudioRouting.shouldForceSpeaker(outputs: [.builtInSpeaker]))
+        XCTAssertFalse(AudioRouting.shouldForceSpeaker(outputs: [.bluetoothA2DP]))
+        XCTAssertFalse(AudioRouting.shouldForceSpeaker(outputs: [.headphones]))
+        XCTAssertEqual(AudioRouting.outputOverride(outputs: [.builtInReceiver]), .speaker)
+        XCTAssertEqual(AudioRouting.outputOverride(outputs: [.bluetoothA2DP]), .none)
+    }
+
+    func testBuiltInMicIsPreferredWhenAnotherInputIsActive() {
+        XCTAssertTrue(AudioRouting.shouldReassertBuiltInMic(
+            currentInput: .bluetoothHFP, availableInputs: [.builtInMic, .bluetoothHFP]))
+        XCTAssertFalse(AudioRouting.shouldReassertBuiltInMic(
+            currentInput: .builtInMic, availableInputs: [.builtInMic, .bluetoothHFP]))
+        XCTAssertFalse(AudioRouting.shouldReassertBuiltInMic(
+            currentInput: .bluetoothHFP, availableInputs: [.bluetoothHFP]))
+    }
+
+    func testOutputOnlyRouteChangeDoesNotRebuildCapture() {
+        let format = AVAudioFormat(standardFormatWithSampleRate: 48000, channels: 1)
+        XCTAssertFalse(AudioRouting.shouldRebuildCapture(
+            engineRunning: true, currentFormat: format, newFormat: format))
+        XCTAssertTrue(AudioRouting.shouldRebuildCapture(
+            engineRunning: false, currentFormat: format, newFormat: format))
+        let other = AVAudioFormat(standardFormatWithSampleRate: 44100, channels: 1)
+        XCTAssertTrue(AudioRouting.shouldRebuildCapture(
+            engineRunning: true, currentFormat: format, newFormat: other))
+    }
+
+    func testInterruptionResumeHonorsQuietHoursAndEnabledState() {
+        XCTAssertTrue(AudioRouting.shouldResumeAfterInterruption(
+            enabled: true, quietHoursActive: false, shouldResume: true))
+        XCTAssertFalse(AudioRouting.shouldResumeAfterInterruption(
+            enabled: true, quietHoursActive: true, shouldResume: true))
+        XCTAssertFalse(AudioRouting.shouldResumeAfterInterruption(
+            enabled: false, quietHoursActive: false, shouldResume: true))
+        XCTAssertFalse(AudioRouting.shouldResumeAfterInterruption(
+            enabled: true, quietHoursActive: false, shouldResume: false))
+    }
+
     func testContinuousBuffersRotateIntoDecodableAACWithoutLosingFrames() async throws {
         let before = Set(QueueStore.pending().map(\.id))
         let lock = NSLock()

@@ -109,6 +109,7 @@ JS = r"""
     const intervals = payload.intervals || [];
     const chunks = payload.chunks || [];
     const sessions = payload.sessions || [];
+    let quietHidden = 0;
     for (const item of intervals) {
       const node = document.createElement("div");
       node.className = "item";
@@ -131,12 +132,14 @@ JS = r"""
     }
     for (const chunk of chunks) {
       const text = chunk.transcript || "";
+      const turns = chunk.speakers || [];
+      if (!text.trim() && turns.length === 0) { quietHidden += 1; continue; }
       if (query && !text.toLowerCase().includes(query)) continue;
       const node = document.createElement("article");
       node.className = "chunk";
       const meta = document.createElement("div");
       meta.className = "meta";
-      meta.textContent = (chunk.started_local || chunk.started) + (chunk.audio_playable ? " · audio retained" : " · audio unavailable");
+      meta.textContent = (chunk.started_local || chunk.started) + (chunk.audio_playable ? " · audio retained" : "");
       const body = document.createElement("p");
       body.textContent = text;
       node.appendChild(meta);
@@ -156,7 +159,7 @@ JS = r"""
         node.appendChild(audio); node.appendChild(keep);
       }
       node.appendChild(body);
-      for (const turn of (chunk.speakers || [])) {
+      for (const turn of turns) {
         const part = document.createElement("div"); part.className = "turn";
         const speaker = turn.name || (turn.suggested_name ? "Maybe " + turn.suggested_name : turn.speaker_key || "Unknown");
         part.textContent = speaker + " · " + turn.started.toFixed(1) + "–" + turn.ended.toFixed(1) + "s";
@@ -180,7 +183,8 @@ JS = r"""
     }
     const pending = document.createElement("p");
     pending.className = "meta";
-    pending.textContent = "Pending " + (payload.pending || 0) + ", errors " + (payload.errors || 0) + ". Speaker labels remain anonymous until confirmed.";
+    pending.textContent = "Pending " + (payload.pending || 0) + ", errors " + (payload.errors || 0) +
+      (quietHidden ? ", quiet clips hidden " + quietHidden : "") + ". Speaker labels remain anonymous until confirmed.";
     pane.appendChild(pending);
   }
   document.getElementById("refresh").addEventListener("click", loadDay);

@@ -11,8 +11,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
+from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig
+
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+DEFAULT_REMOTE_HOST = "lr.genr8ive.ai"
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -144,9 +148,15 @@ summary { cursor: pointer; color: var(--muted); }
 """
 JS = r"""
 (() => {
-  let token = location.hash.replace(/^#/, "") || sessionStorage.getItem("life-recorder-token") || "";
-  if (location.hash) {
-    sessionStorage.setItem("life-recorder-token", token);
+  const remote = !["127.0.0.1", "localhost"].includes(location.hostname);
+  let token = "";
+  if (!remote) {
+    token = location.hash.replace(/^#/, "") || sessionStorage.getItem("life-recorder-token") || "";
+    if (location.hash) {
+      sessionStorage.setItem("life-recorder-token", token);
+      history.replaceState(null, "", location.pathname);
+    }
+  } else if (location.hash) {
     history.replaceState(null, "", location.pathname);
   }
   const status = document.getElementById("status");
@@ -181,7 +191,7 @@ JS = r"""
   let identitySample = false;
   let identityNewName = "";
   function authHeaders() {
-    return { Authorization: "Bearer " + token };
+    return remote ? {} : { Authorization: "Bearer " + token };
   }
   function reasonText(code) {
     return ({
@@ -356,7 +366,11 @@ JS = r"""
     nowPlaying.textContent = chunk ? ((chunk.started_local || "Recording") + (chunk.audio_playable ? "" : " · audio unavailable")) : "No recording selected";
     keepButton.onclick = chunk && chunk.audio_playable ? async () => {
       const keptId = chunk.id;
-      const response = await fetch("/v1/chunks/" + keptId + "/keep", { method: "POST", headers: authHeaders() });
+      const response = await fetch("/v1/chunks/" + keptId + "/keep", {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: "{}",
+      });
       if (!response.ok) return;
       const current = (payload.chunks || []).find((item) => item.id === keptId);
       if (current) current.audio_pinned = true;
@@ -767,6 +781,10 @@ class ViewerHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "LifeViewer"
 
+    def setup(self):
+        super().setup()
+        self.connection.settimeout(5)
+
     def log_message(self, *args):
         pass
 
@@ -776,20 +794,48 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def _token(self) -> str:
         return self.server.viewer_token
 
+    def _requested_host(self) -> str:
+        return (self.headers.get("Host") or "").split(":")[0].strip().lower()
+
+    def _remote_config(self):
+        return getattr(self.server, "remote_access", None)
+
+    def _is_remote_host(self) -> bool:
+        config = self._remote_config()
+        return bool(config) and self._requested_host() == config.host
+
     def _host_ok(self) -> bool:
-        host = (self.headers.get("Host") or "").split(":")[0]
-        return host in ("127.0.0.1", "localhost")
+        host = self._requested_host()
+        if host in LOCAL_HOSTS:
+            return True
+        config = self._remote_config()
+        return bool(config) and host == config.host
 
     def _origin_ok(self) -> bool:
         origin = self.headers.get("Origin")
         if not origin:
             return True
         parsed = urlparse(origin)
-        return parsed.hostname in ("127.0.0.1", "localhost") and parsed.scheme in ("http", "https")
+        host = (parsed.hostname or "").lower()
+        if host in LOCAL_HOSTS and parsed.scheme in ("http", "https") and parsed.path in ("", "/"):
+            return True
+        config = self._remote_config()
+        return bool(config) and origin == config.origin
 
     def _authorized(self) -> bool:
-        supplied = self.headers.get("Authorization", "")
-        return hmac.compare_digest(supplied.encode(), ("Bearer " + self._token()).encode())
+        if self._requested_host() in LOCAL_HOSTS:
+            supplied = self.headers.get("Authorization", "")
+            return hmac.compare_digest(supplied.encode(), ("Bearer " + self._token()).encode())
+        config = self._remote_config()
+        verifier = getattr(self.server, "access_verifier", None)
+        if not config or verifier is None:
+            return False
+        token = self.headers.get("Cf-Access-Jwt-Assertion", "")
+        try:
+            verifier.validate(token)
+            return True
+        except AccessAuthError:
+            return False
 
     def _headers(self, content_type: str, length: int, extra=None):
         self.send_header("Content-Type", content_type)
@@ -818,12 +864,91 @@ class ViewerHandler(BaseHTTPRequestHandler):
         self._headers("text/plain", 0)
         self.close_connection = True
 
+    def parse_byte_range(self, header: str, size: int):
+        if not header.startswith("bytes=") or "," in header:
+            raise ValueError("unsatisfiable")
+        left, right = header[6:].split("-", 1)
+        if left == "" and right == "":
+            raise ValueError("unsatisfiable")
+        if left == "":
+            suffix = int(right)
+            if suffix <= 0 or size == 0:
+                raise ValueError("unsatisfiable")
+            start = max(0, size - suffix)
+            return start, size - 1
+        start = int(left)
+        end = int(right) if right else size - 1
+        if start < 0 or (right and end < start) or start >= size:
+            raise ValueError("unsatisfiable")
+        return start, min(end, size - 1)
+
+    def _send_audio(self, audio: Path, include_body: bool):
+        size = audio.stat().st_size
+        start, end, status = 0, max(0, size - 1), 200
+        range_header = self.headers.get("Range")
+        extra = {"Accept-Ranges": "bytes"}
+        if range_header:
+            try:
+                start, end = self.parse_byte_range(range_header, size)
+                status = 206
+                extra["Content-Range"] = f"bytes {start}-{end}/{size}"
+            except (ValueError, TypeError):
+                return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
+        length = 0 if size == 0 else (end - start + 1)
+        extra.pop("Content-Length", None)
+        self.send_response(status)
+        self._headers("audio/mp4", length, extra)
+        if include_body and length:
+            with audio.open("rb") as handle:
+                handle.seek(start)
+                remaining = length
+                while remaining:
+                    chunk = handle.read(min(65536, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+        self.close_connection = True
+
+    def do_HEAD(self):
+        if not self._host_ok() or not self._origin_ok():
+            return self._json(403, {"error": "Forbidden"})
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path in ("/", "/app.css", "/app.js"):
+            if self._is_remote_host() and not self._authorized():
+                return self._json(401, {"error": "Unauthorized"})
+            assets = {
+                "/": (APP.encode(), "text/html; charset=utf-8"),
+                "/app.css": (CSS.encode(), "text/css"),
+                "/app.js": (JS.encode(), "text/javascript"),
+            }
+            body, ctype = assets[path]
+            self.send_response(200)
+            self._headers(ctype, len(body))
+            self.close_connection = True
+            return
+        if not self._authorized():
+            return self._json(401, {"error": "Unauthorized"})
+        if path.startswith("/v1/audio/"):
+            chunk_id = path.removeprefix("/v1/audio/")
+            row = self._inbox().receipt(chunk_id)
+            if not row or row["status"] != "complete" or row["audio_state"] != "present":
+                return self._json(404, {"error": "Audio unavailable"})
+            audio = Path(row["path"])
+            if not audio.is_file():
+                return self._json(404, {"error": "Audio unavailable"})
+            return self._send_audio(audio, include_body=False)
+        return self._json(404, {"error": "Not found"})
+
     def do_GET(self):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"error": "Forbidden"})
         parsed = urlparse(self.path)
         path = parsed.path
         if path in ("/", "/app.css", "/app.js"):
+            if self._is_remote_host() and not self._authorized():
+                return self._json(401, {"error": "Unauthorized"})
             assets = {
                 "/": (APP.encode(), "text/html; charset=utf-8"),
                 "/app.css": (CSS.encode(), "text/css"),
@@ -843,27 +968,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
             audio = Path(row["path"])
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
-            size = audio.stat().st_size
-            start, end, status = 0, max(0, size - 1), 200
-            range_header = self.headers.get("Range")
-            if range_header:
-                if not range_header.startswith("bytes=") or "," in range_header:
-                    return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
-                try:
-                    left, right = range_header[6:].split("-", 1)
-                    start = int(left) if left else max(0, size - int(right))
-                    end = int(right) if right else size - 1
-                    if start < 0 or end < start or start >= size:
-                        raise ValueError
-                    end = min(end, size - 1); status = 206
-                except (ValueError, TypeError):
-                    return self._send(416, b"", "text/plain", {"Content-Range": f"bytes */{size}"})
-            with audio.open("rb") as handle:
-                handle.seek(start); body = handle.read(end - start + 1)
-            extra = {"Accept-Ranges": "bytes"}
-            if status == 206:
-                extra["Content-Range"] = f"bytes {start}-{end}/{size}"
-            return self._send(status, body, "audio/mp4", extra)
+            return self._send_audio(audio, include_body=True)
         if path.startswith("/v1/days/"):
             day = path.removeprefix("/v1/days/")
             try:
@@ -874,18 +979,36 @@ class ViewerHandler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "Not found"})
 
     def do_POST(self):
-        if not self._host_ok() or not self._origin_ok() or not self._authorized():
+        if not self._host_ok() or not self._authorized():
             return self._json(401, {"error": "Unauthorized"})
+        origin = self.headers.get("Origin")
+        if self._is_remote_host():
+            if origin != self._remote_config().origin:
+                return self._json(403, {"error": "Forbidden"})
+        elif not self._origin_ok():
+            return self._json(403, {"error": "Forbidden"})
         path = urlparse(self.path).path
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        body = {}
-        if length:
-            if length > 4096:
-                return self._json(413, {"error": "Request too large"})
-            try:
-                body = json.loads(self.rfile.read(length))
-            except (ValueError, json.JSONDecodeError):
-                return self._json(400, {"error": "Invalid JSON"})
+        if self.headers.get("Transfer-Encoding"):
+            return self._json(400, {"error": "Transfer encoding unsupported"})
+        if self.headers.get_content_type() != "application/json":
+            return self._json(415, {"error": "JSON required"})
+        try:
+            length = int(self.headers.get("Content-Length", ""))
+        except (TypeError, ValueError):
+            return self._json(400, {"error": "Invalid content length"})
+        if length < 0:
+            return self._json(400, {"error": "Invalid content length"})
+        if length > 4096:
+            return self._json(413, {"error": "Request too large"})
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            return self._json(400, {"error": "Incomplete body"})
+        try:
+            body = json.loads(raw)
+        except (ValueError, json.JSONDecodeError):
+            return self._json(400, {"error": "Invalid JSON"})
+        if not isinstance(body, dict):
+            return self._json(400, {"error": "JSON object required"})
         if path == "/v1/people":
             try:
                 return self._json(201, self._inbox().create_person(body.get("name", "")))
@@ -940,7 +1063,17 @@ def write_launcher(root: Path) -> None:
     os.chmod(command, 0o700)
 
 
-def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT):
+def remote_access_config(host=None, team_domain=None, audience=None, issuer=None):
+    host = host or os.environ.get("LIFE_RECORDER_VIEWER_REMOTE_HOST", "")
+    team_domain = team_domain or os.environ.get("LIFE_RECORDER_ACCESS_TEAM_DOMAIN", "")
+    audience = audience or os.environ.get("LIFE_RECORDER_ACCESS_AUD", "")
+    issuer = issuer or os.environ.get("LIFE_RECORDER_ACCESS_ISSUER") or None
+    if not host and not team_domain and not audience:
+        return None
+    return RemoteAccessConfig.from_values(host or DEFAULT_REMOTE_HOST, team_domain, audience, issuer)
+
+
+def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote=None):
     write_launcher(inbox.root)
     token = ensure_viewer_token(inbox.root)
     if host != VIEWER_HOST:
@@ -953,6 +1086,8 @@ def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT):
         return None
     server.inbox = inbox
     server.viewer_token = token
+    server.remote_access = remote
+    server.access_verifier = AccessVerifier(remote) if remote else None
     inbox.viewer_error = None
     inbox.viewer_server = server
     thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -46,6 +46,8 @@ The receiver writes the combined transcript to `life.md`, daily Markdown files t
 
 The receiver also serves a loopback-only authenticated viewer at `http://127.0.0.1:8767`. Open `open-viewer.command` from the private data directory to launch it without copying its token into the browser history. The viewer provides a day picker, transcript search, capture sessions, meeting/event hints, and pending/error counts.
 
+Optional remote viewing for `lr.genr8ive.ai` stays bound to `127.0.0.1:8767`. Enable it with `--viewer-remote-host lr.genr8ive.ai` plus Cloudflare Access `--access-team-domain` and `--access-aud` (or `LIFE_RECORDER_ACCESS_TEAM_DOMAIN` / `LIFE_RECORDER_ACCESS_AUD`). The origin then accepts that exact Host, exact `https://lr.genr8ive.ai` Origin on mutations, and a verified `Cf-Access-Jwt-Assertion` RS256 JWT. Local `open-viewer.command` bearer flow is unchanged. Do not publish receiver port 8766. Install `PyJWT[crypto]` from `requirements-viewer.txt`.
+
 The viewer lists captured chunks and transcripts, but it cannot play completed audio because the receiver deletes audio after successful transcription. Changing that behavior requires an explicit retention policy and additional private storage.
 
 ## Recording behavior

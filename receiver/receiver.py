@@ -801,6 +801,10 @@ def main():
     parser.add_argument("--parakeet-model-dir", type=Path, default=asr_mod.DEFAULT_PARAKEET_MODEL_DIR)
     parser.add_argument("--diarization-cli", type=Path, default=asr_mod.DEFAULT_PARAKEET_CLI)
     parser.add_argument("--init", action="store_true", help="Create the inbox, then exit")
+    parser.add_argument("--viewer-remote-host", help="Exact public hostname allowed to reach the loopback viewer")
+    parser.add_argument("--access-team-domain", help="Cloudflare Access team domain, for example example.cloudflareaccess.com")
+    parser.add_argument("--access-aud", help="Cloudflare Access application audience")
+    parser.add_argument("--access-issuer", help="Optional Access issuer, default https://<team-domain>")
     args = parser.parse_args()
     os.umask(0o077)
     inbox = Inbox(args.data_dir)
@@ -845,7 +849,19 @@ def main():
     if args.ffmpeg and args.diarization_cli.is_file():
         threading.Thread(target=diarization_mod.worker,
                          args=(inbox, stop, args.diarization_cli, args.ffmpeg), daemon=True).start()
-    viewer_mod.start_viewer(inbox)
+    remote = None
+    remote_host = args.viewer_remote_host or os.environ.get("LIFE_RECORDER_VIEWER_REMOTE_HOST")
+    if remote_host or args.access_team_domain or args.access_aud:
+        try:
+            remote = viewer_mod.remote_access_config(
+                host=args.viewer_remote_host,
+                team_domain=args.access_team_domain,
+                audience=args.access_aud,
+                issuer=args.access_issuer,
+            )
+        except Exception as error:
+            parser.error(str(error))
+    viewer_mod.start_viewer(inbox, remote=remote)
     print(f"Receiver listening on {args.host}:{args.port}; local transcripts: {inbox.root / 'life.md'}", flush=True)
     try:
         server.serve_forever()

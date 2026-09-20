@@ -9,6 +9,8 @@ Build the native iOS target in `ios/LifeRecorder.xcodeproj`, configure the Pytho
 
 ## Phone control
 
+The Mac viewer binds only to `127.0.0.1:8767`. Optional remote Access JWT mode for `lr.genr8ive.ai` is opt-in and never exposes receiver `8766`.
+
 Use Apple CoreDevice (`xcrun devicectl`) for read-only device inspection, installation, and launching the bundle on a connected device. Use the CUA iPhone Mirroring surface for visual UI actions when the phone is available. Do not bypass a passcode or protected system dialog. If iOS reports that the device is locked, ask the user to unlock it and open Life Recorder once.
 
 ## Required user permissions

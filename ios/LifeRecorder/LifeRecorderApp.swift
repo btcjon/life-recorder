@@ -90,6 +90,13 @@ struct ContentView: View {
                             Text("Last upload: \(date.formatted(date: .omitted, time: .shortened))")
                                 .font(.footnote).foregroundStyle(.secondary)
                         }
+                        if uploads.pendingCount > 0 {
+                            Button("Retry uploads now", systemImage: "arrow.clockwise") {
+                                uploads.retryNow()
+                            }
+                            .buttonStyle(.bordered)
+                            .accessibilityIdentifier("retryUploads")
+                        }
                         if recorder.incompleteClips > 0 {
                             Text("\(recorder.incompleteClips) interrupted clips need recovery. They remain on this phone.")
                                 .foregroundStyle(.orange)

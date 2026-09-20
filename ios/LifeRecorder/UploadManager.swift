@@ -14,10 +14,11 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
     private var responseData: [Int: Data] = [:]
     private var retries: [String: Date] = [:]
     private var failureCounts: [String: Int] = [:]
+    private var immediateRetryTaskIDs = Set<Int>()
     private var pumping = false
     private var authenticationRejected = false
     private var timer: Timer?
-    private static let staleTaskInterval: TimeInterval = 15 * 60
+    private static let staleTaskInterval: TimeInterval = 60
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
         config.isDiscretionary = false
@@ -50,9 +51,24 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
         authenticationRejected = false
         retries.removeAll()
         failureCounts.removeAll()
+        retryNow()
+    }
+
+    func retryNow() {
+        authenticationRejected = false
+        retries.removeAll()
+        failureCounts.removeAll()
+        status = "Retrying uploads now"
         session.getAllTasks { tasks in
-            tasks.forEach { $0.cancel() }
-            DispatchQueue.main.async { self.pump() }
+            DispatchQueue.main.async {
+                for task in tasks {
+                    if Self.taskID(task.taskDescription) != nil {
+                        self.immediateRetryTaskIDs.insert(task.taskIdentifier)
+                    }
+                    task.cancel()
+                }
+                self.pump()
+            }
         }
     }
 
@@ -77,8 +93,11 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                     }
                     if let started = Self.taskStart(task.taskDescription),
                        now.timeIntervalSince(started) > Self.staleTaskInterval {
-                        // The delegate will retain this clip and schedule a
-                        // bounded retry after the cancellation completes.
+                        // A background transfer can remain alive indefinitely
+                        // after the route changes. Cancel it and let the
+                        // delegate immediately recreate it instead of applying
+                        // the normal failure backoff.
+                        self.immediateRetryTaskIDs.insert(task.taskIdentifier)
                         task.cancel()
                         continue
                     }
@@ -152,6 +171,13 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
               let chunk = QueueStore.pending().first(where: { $0.name == id }) else { pump(); return }
         struct Receipt: Decodable { let id: String; let sha256: String; let durable: Bool }
         let response = task.response as? HTTPURLResponse
+        if immediateRetryTaskIDs.remove(task.taskIdentifier) != nil {
+            retries.removeValue(forKey: id)
+            failureCounts.removeValue(forKey: id)
+            status = "Retrying uploads now"
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.pump() }
+            return
+        }
         if error == nil, let response, [200, 201].contains(response.statusCode),
            let receipt = try? JSONDecoder().decode(Receipt.self, from: data),
            receipt.durable, receipt.id == id, receipt.sha256 == chunk.sha256 {
@@ -159,10 +185,16 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                 try QueueStore.removeAcknowledged(chunk)
                 retries.removeValue(forKey: id)
                 failureCounts.removeValue(forKey: id)
+                UserDefaults.standard.removeObject(forKey: "lastUploadError")
                 lastUploadedAt = Date()
                 status = "Uploaded safely; local copy removed"
             } catch { status = "Uploaded; local cleanup will retry on reopening" }
         } else {
+            if let error = error as NSError? {
+                UserDefaults.standard.set("\(error.domain):\(error.code)", forKey: "lastUploadError")
+            } else if let response {
+                UserDefaults.standard.set("HTTP:\(response.statusCode)", forKey: "lastUploadError")
+            }
             let failures = (failureCounts[id] ?? 0) + 1
             failureCounts[id] = failures
             retries[id] = Date().addingTimeInterval(min(1800, 15 * pow(2, Double(min(failures, 7)))))

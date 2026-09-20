@@ -38,22 +38,29 @@ subprocess.run(["/usr/bin/open", url], check=True, stdout=subprocess.DEVNULL, st
 APP = """<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <title>Life Recorder</title>
 <link rel="stylesheet" href="/app.css">
 <body>
 <a class="skip" href="#pane">Skip to recording</a>
 <header>
-  <h1>Life Recorder</h1>
-  <nav aria-label="Library">
-    <button id="tab-recordings" type="button" aria-pressed="true">Recordings</button>
-    <button id="tab-people" type="button" aria-pressed="false">People</button>
-  </nav>
-  <label>Day <input id="day" type="date"></label>
-  <label>Search <input id="search" type="search" placeholder="Search recordings"></label>
-  <label><input id="show-all" type="checkbox"> Show quiet/pending</label>
-  <button id="refresh" type="button">Refresh</button>
+  <div class="header-primary">
+    <h1>Life Recorder</h1>
+    <nav aria-label="Library">
+      <button id="tab-recordings" type="button" aria-pressed="true">Recordings</button>
+      <button id="tab-people" type="button" aria-pressed="false">People</button>
+    </nav>
+    <label class="day-control">Day <input id="day" type="date"></label>
+    <button id="refresh" type="button">Refresh</button>
+  </div>
+  <details id="filters" open>
+    <summary>Filters</summary>
+    <div class="filter-body">
+      <label>Search <input id="search" type="search" placeholder="Search recordings"></label>
+      <label><input id="show-all" type="checkbox"> Show quiet/pending</label>
+    </div>
+  </details>
   <p id="status" aria-live="polite">Loading</p>
 </header>
 <main>
@@ -79,15 +86,19 @@ APP = """<!doctype html>
 CSS = """
 :root { color-scheme: light; --sidebar: 304px; --canvas: #f5f6f8; --rail: #eceff3; --surface: #fff; --text: #18212f; --muted: #596577; --line: #dce1e8; --accent: #245fcc; --accent-soft: #eaf1ff; }
 * { box-sizing: border-box; }
-html, body { margin: 0; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--canvas); color: var(--text); }
+html, body { margin: 0; min-width: 0; overflow-wrap: anywhere; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--canvas); color: var(--text); }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 12px; top: 12px; z-index: 10; background: #fff; padding: 8px; border-radius: 8px; }
-header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 64px; padding: 12px 20px; background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); }
+header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 64px; padding: 12px 20px; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); }
+.header-primary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-width: 0; }
+#filters { margin: 0; padding: 0; border: 0; }
+#filters .filter-body { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
 h1 { margin: 0 12px 0 0; font-size: 18px; letter-spacing: -.01em; }
 h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
 h3 { margin: 0 0 6px; font-size: 14px; }
 nav { display: flex; gap: 6px; }
 button, select, input { min-height: 34px; padding: 6px 10px; border: 1px solid #c9d0da; border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+#back-recordings { display: none; }
 button { cursor: pointer; font-weight: 550; }
 button:hover { border-color: #9eabbc; background: #f8fafc; }
 button[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); color: #184b9f; }
@@ -123,8 +134,7 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .person-option[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); }
 .popover-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .popover details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-@media (max-width: 390px) { .popover { width: calc(100vw - 44px); } }
-#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
+#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
 #now-playing { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 #player { width: min(520px, 100%); }
 #help { margin: 0; padding: 7px 20px; color: var(--muted); background: var(--surface); font-size: 11px; text-align: center; }
@@ -132,15 +142,47 @@ details { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line)
 summary { cursor: pointer; color: var(--muted); }
 .hidden { display: none; }
 [hidden] { display: none !important; }
-@media (max-width: 900px) {
-  #status { width: 100%; margin-left: 0; }
-  #library { grid-template-columns: 1fr; height: auto; }
-  aside { min-width: 0; max-width: none; width: auto; max-height: 36vh; border-right: 0; border-bottom: 1px solid var(--line); }
+.person { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; }
+.person input { min-width: 0; flex: 1 1 160px; }
+.popover { overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  html, body { overflow-x: hidden; }
+  header { gap: 8px; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  .header-primary { width: 100%; }
+  h1 { font-size: 16px; }
+  button, select, input, summary, .row, .pill, .person-option { min-height: 44px; font-size: 16px; }
+  #filters { width: 100%; margin: 0; padding: 0; border: 0; }
+  #filters > summary { min-height: 44px; font-size: 16px; }
+  #filters .filter-body { flex-direction: column; align-items: stretch; padding-top: 8px; }
+  #filters .filter-body label:first-child { flex-direction: column; align-items: stretch; }
+  #filters .filter-body input[type="search"] { min-width: 0; width: 100%; }
+  #status { width: 100%; margin: 0; }
+  #library { display: block; height: auto; min-height: 0; }
+  aside, #pane, #people-view { overflow: visible; min-width: 0; }
+  aside { width: auto; max-width: none; min-width: 0; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); border-right: 0; }
+  #pane { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
+  #people-view { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
+  body.mobile-list #pane { display: none; }
+  body.mobile-detail aside { display: none; }
+  body.mobile-list #player-bar, body.mobile-people #player-bar { display: none; }
+  #back-recordings { display: inline-flex; align-items: center; }
+  .popover { position: static; width: 100%; max-width: none; margin-top: 8px; }
+  .popover input, .popover select { min-width: 0; width: 100%; }
+  .identity-anchor { display: block; width: 100%; min-width: 0; }
   #player-bar { grid-template-columns: 1fr; }
+  #player { width: 100%; }
+  .person { flex-direction: column; align-items: stretch; }
+  .person input, .person button { width: 100%; }
+  .person input { flex: none; }
 }
-@media (max-width: 390px) {
-  header, #player-bar { padding: 8px; gap: 8px; }
-  h1 { font-size: 15px; }
+@media (min-width: 761px) {
+  #filters { display: contents; }
+  #filters > summary { display: none; }
+  #filters .filter-body { display: contents; }
+  #back-recordings { display: none !important; }
+}
+@media (max-width: 320px) {
+  .person { flex-direction: column; align-items: stretch; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; animation: none !important; }
@@ -173,6 +215,7 @@ JS = r"""
   const keepButton = document.getElementById("keep");
   const tabRecordings = document.getElementById("tab-recordings");
   const tabPeople = document.getElementById("tab-people");
+  const filters = document.getElementById("filters");
   let payload = null;
   let audioUrl = null;
   let loadedAudioId = null;
@@ -190,6 +233,14 @@ JS = r"""
   let createdPersonName = null;
   let identitySample = false;
   let identityNewName = "";
+  let mobileDetailOpen = false;
+  let listScroll = 0;
+  const MOBILE_BP = 760;
+  function isMobile() {
+    return window.matchMedia("(max-width: " + MOBILE_BP + "px)").matches;
+  }
+  let mobileLayout = isMobile();
+  filters.open = !mobileLayout;
   function authHeaders() {
     return remote ? {} : { Authorization: "Bearer " + token };
   }
@@ -236,7 +287,10 @@ JS = r"""
     const nextPayload = await response.json();
     if (requestId !== dayRequest) return;
     payload = nextPayload;
-    if (selectedId && !(payload.chunks || []).some((chunk) => chunk.id === selectedId)) selectedId = null;
+    if (selectedId && !(payload.chunks || []).some((chunk) => chunk.id === selectedId)) {
+      selectedId = null;
+      mobileDetailOpen = false;
+    }
     render();
     const issues = [];
     if (payload.pending) issues.push(payload.pending + " pending");
@@ -327,11 +381,12 @@ JS = r"""
       list.appendChild(node);
     }
     const chunks = visibleChunks();
-    if (!selectedId && chunks[0]) selectedId = chunks[0].id;
+    if (!isMobile() && !selectedId && chunks[0]) selectedId = chunks[0].id;
     for (const chunk of chunks) {
       const row = document.createElement("button");
       row.type = "button";
       row.className = "row";
+      row.id = "recording-" + chunk.id;
       row.setAttribute("aria-current", chunk.id === selectedId ? "true" : "false");
       const title = document.createElement("div");
       title.textContent = (chunk.started_local || chunk.started || "Recording") + " · " + Number(chunk.duration || 0).toFixed(0) + "s";
@@ -347,7 +402,15 @@ JS = r"""
       row.addEventListener("click", () => {
         if (selectedId !== chunk.id) openIdentityKey = null;
         selectedId = chunk.id;
+        if (isMobile()) {
+          listScroll = list.scrollTop || window.scrollY || 0;
+          mobileDetailOpen = true;
+        }
         render();
+        if (isMobile()) {
+          const back = document.getElementById("back-recordings");
+          if (back) back.focus();
+        }
       });
       list.appendChild(row);
     }
@@ -573,6 +636,24 @@ JS = r"""
     pane.replaceChildren();
     const chunk = (payload.chunks || []).find((item) => item.id === selectedId);
     attachAudio(chunk);
+    if (isMobile()) {
+      const back = document.createElement("button");
+      back.type = "button";
+      back.id = "back-recordings";
+      back.textContent = "Back to recordings";
+      back.addEventListener("click", () => {
+        mobileDetailOpen = false;
+        render();
+        const restore = () => {
+          const row = selectedId ? document.getElementById("recording-" + selectedId) : null;
+          window.scrollTo(0, listScroll);
+          if (list) list.scrollTop = listScroll;
+          if (row) row.focus();
+        };
+        requestAnimationFrame(restore);
+      });
+      pane.appendChild(back);
+    }
     if (!chunk) {
       const empty = document.createElement("p");
       empty.textContent = "Select a recording.";
@@ -641,7 +722,21 @@ JS = r"""
         }, 0);
       });
       anchor.appendChild(pill);
-      if (openIdentityKey === group.key) anchor.appendChild(identityPopover(group));
+      if (openIdentityKey === group.key) {
+        const editor = identityPopover(group);
+        if (isMobile()) {
+          const close = document.createElement("button");
+          close.type = "button";
+          close.textContent = "Close";
+          close.addEventListener("click", () => closePopover(true));
+          const footer = editor.querySelector(".popover-footer") || editor.appendChild(document.createElement("div"));
+          footer.className = "popover-footer";
+          if (![...footer.querySelectorAll("button")].some((button) => button.textContent === "Close" || button.textContent === "Cancel")) {
+            footer.insertBefore(close, footer.firstChild);
+          }
+        }
+        anchor.appendChild(editor);
+      }
       speakers.appendChild(anchor);
     }
     pane.appendChild(speakers);
@@ -741,7 +836,13 @@ JS = r"""
   }
   function render() {
     if (!payload) return;
+    const mobile = isMobile();
+    document.body.classList.toggle("mobile-list", mobile && view === "recordings" && !mobileDetailOpen);
+    document.body.classList.toggle("mobile-detail", mobile && view === "recordings" && mobileDetailOpen);
+    document.body.classList.toggle("mobile-people", mobile && view === "people");
+    if (!mobile) mobileDetailOpen = false;
     if (view === "people") {
+      document.body.classList.remove("mobile-list", "mobile-detail");
       renderPeople();
       return;
     }
@@ -768,6 +869,13 @@ JS = r"""
   day.addEventListener("change", loadDay);
   search.addEventListener("input", render);
   showAll.addEventListener("change", render);
+  window.addEventListener("resize", () => {
+    const nextMobileLayout = isMobile();
+    if (nextMobileLayout === mobileLayout) return;
+    mobileLayout = nextMobileLayout;
+    filters.open = !mobileLayout;
+    if (payload) render();
+  });
   loadDays().then(loadDay).catch(() => { status.textContent = "Open through the local launcher."; });
 })();
 """

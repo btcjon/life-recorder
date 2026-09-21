@@ -33,7 +33,7 @@
 		<true/>
 		<key>NSExceptionDomains</key>
 		<dict>
-			<key>your-mac.example.ts.net</key>
+		<key>jons-macbook-pro-1010.tailf3d7b6.ts.net</key>
 			<dict>
 				<key>NSExceptionAllowsInsecureHTTPLoads</key>
 				<true/>

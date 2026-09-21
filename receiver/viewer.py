@@ -307,8 +307,7 @@ JS = r"""
     if (requestId !== dayRequest) return;
     payload = nextPayload;
     const stillChunk = selectedKind === "chunk" && (payload.chunks || []).some((chunk) => chunk.id === selectedId);
-    const stillEvent = selectedKind === "event" && (payload.events || []).some((item) => item.id === selectedId);
-    if (selectedId && !stillChunk && !stillEvent) {
+    if (selectedId && !stillChunk) {
       selectedId = null;
       selectedKind = "chunk";
       mobileDetailOpen = false;
@@ -416,7 +415,10 @@ JS = r"""
       list.appendChild(node);
     }
     const chunks = visibleChunks();
-    const events = (search.value || "").trim() ? [] : (payload.events || []);
+    // Speech events are internal processing artifacts. The source recordings
+    // carry transcripts, speaker clips, and assignment controls, so listing
+    // both creates duplicate rows with mostly empty detail screens.
+    const events = [];
     const eventRows = document.createDocumentFragment();
     if (!isMobile() && !selectedId && chunks[0]) { selectedId = chunks[0].id; selectedKind = "chunk"; }
     for (const item of events) {

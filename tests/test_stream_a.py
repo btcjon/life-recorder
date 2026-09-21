@@ -498,6 +498,8 @@ class PersistenceAndViewerTests(unittest.TestCase):
                 self.assertIn("mobile-list", viewer_mod.JS)
                 self.assertIn("@media (max-width: 760px)", viewer_mod.CSS)
                 self.assertIn("min-height: 44px", viewer_mod.CSS)
+                self.assertIn("display: flex; flex-direction: column", viewer_mod.CSS)
+                self.assertIn("This is a derived speech event", viewer_mod.JS)
                 self.assertNotIn("max-height: 36vh", viewer_mod.CSS)
                 status, favicon, favicon_headers = get("/favicon-32.png", {"Host": "127.0.0.1"})
                 self.assertEqual(status, 200)

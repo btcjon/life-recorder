@@ -96,6 +96,8 @@ CSS = """
 :root { color-scheme: light; --sidebar: 304px; --canvas: #f5f6f8; --rail: #eceff3; --surface: #fff; --text: #18212f; --muted: #596577; --line: #dce1e8; --accent: #245fcc; --accent-soft: #eaf1ff; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-width: 0; overflow-wrap: anywhere; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--canvas); color: var(--text); }
+body { min-height: 100vh; display: flex; flex-direction: column; }
+main { flex: 1 1 auto; min-height: 0; }
 .skip { position: absolute; left: -999px; }
 .skip:focus { left: 12px; top: 12px; z-index: 10; background: #fff; padding: 8px; border-radius: 8px; }
 header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 64px; padding: 12px 20px; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); }
@@ -115,7 +117,7 @@ button:disabled { cursor: default; opacity: .55; }
 button:focus-visible, select:focus-visible, input:focus-visible, .row:focus-visible, summary:focus-visible { outline: 3px solid rgba(36,95,204,.3); outline-offset: 2px; }
 header label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
 #status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
-#library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); height: calc(100vh - 166px); min-height: 460px; }
+#library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); height: 100%; min-height: 0; }
 aside, #pane, #people-view { overflow: auto; }
 aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px 12px; background: var(--rail); border-right: 1px solid var(--line); }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
@@ -747,6 +749,13 @@ JS = r"""
       meta.textContent = Number(item.playable_duration || item.duration || 0).toFixed(1) + " seconds playable";
       pane.appendChild(title);
       pane.appendChild(meta);
+      const explanation = document.createElement("p");
+      explanation.textContent = "This is a derived speech event. Use the player below to hear it, or choose Original/Enhanced.";
+      pane.appendChild(explanation);
+      const source = document.createElement("p");
+      source.className = "meta";
+      source.textContent = (item.chunks || []).length + " source recording" + ((item.chunks || []).length === 1 ? "" : "s") + " · Full transcripts and speaker assignment are available from the source recordings.";
+      pane.appendChild(source);
       return;
     }
     const chunk = selectedItem();

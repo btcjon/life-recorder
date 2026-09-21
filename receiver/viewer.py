@@ -117,8 +117,8 @@ button:disabled { cursor: default; opacity: .55; }
 button:focus-visible, select:focus-visible, input:focus-visible, .row:focus-visible, summary:focus-visible { outline: 3px solid rgba(36,95,204,.3); outline-offset: 2px; }
 header label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
 #status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
-#library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); height: 100%; min-height: 0; }
-aside, #pane, #people-view { overflow: auto; }
+#library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
+aside, #pane, #people-view { overflow: auto; min-height: 0; }
 aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px 12px; background: var(--rail); border-right: 1px solid var(--line); }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
 #pane > * { max-width: 860px; }
@@ -188,6 +188,10 @@ summary { cursor: pointer; color: var(--muted); }
   .person input { flex: none; }
 }
 @media (min-width: 761px) {
+  html, body { height: 100%; overflow: hidden; }
+  header, #player-bar, #help { flex: 0 0 auto; }
+  main { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
+  #library, #people-view { flex: 1 1 auto; min-height: 0; }
   #filters { display: contents; }
   #filters > summary { display: none; }
   #filters .filter-body { display: contents; }

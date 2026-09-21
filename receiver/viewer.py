@@ -18,7 +18,7 @@ VIEWER_HOST = "127.0.0.1"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 DEFAULT_REMOTE_HOST = "lr.genr8ive.ai"
 CSP = (
-    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'none'; media-src 'self' blob:; "
+    "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 )
 LAUNCHER = """#!/bin/zsh
@@ -40,7 +40,12 @@ APP = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#245fcc">
 <title>Life Recorder</title>
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
+<link rel="icon" type="image/png" sizes="512x512" href="/app-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
 <link rel="stylesheet" href="/app.css">
 <body>
 <a class="skip" href="#pane">Skip to recording</a>
@@ -1139,13 +1144,18 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "Forbidden"})
         parsed = urlparse(self.path)
         path = parsed.path
-        if path in ("/", "/app.css", "/app.js"):
+        if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
+                    "/app-icon.png", "/apple-touch-icon.png"):
             if self._is_remote_host() and not self._authorized():
                 return self._json(401, {"error": "Unauthorized"})
             assets = {
                 "/": (APP.encode(), "text/html; charset=utf-8"),
                 "/app.css": (CSS.encode(), "text/css"),
                 "/app.js": (JS.encode(), "text/javascript"),
+                "/favicon-16.png": ((Path(__file__).with_name("assets") / "favicon-16.png").read_bytes(), "image/png"),
+                "/favicon-32.png": ((Path(__file__).with_name("assets") / "favicon-32.png").read_bytes(), "image/png"),
+                "/app-icon.png": ((Path(__file__).with_name("assets") / "life-recorder-icon.png").read_bytes(), "image/png"),
+                "/apple-touch-icon.png": ((Path(__file__).with_name("assets") / "apple-touch-icon.png").read_bytes(), "image/png"),
             }
             body, ctype = assets[path]
             self.send_response(200)
@@ -1174,13 +1184,18 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(403, {"error": "Forbidden"})
         parsed = urlparse(self.path)
         path = parsed.path
-        if path in ("/", "/app.css", "/app.js"):
+        if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
+                    "/app-icon.png", "/apple-touch-icon.png"):
             if self._is_remote_host() and not self._authorized():
                 return self._json(401, {"error": "Unauthorized"})
             assets = {
                 "/": (APP.encode(), "text/html; charset=utf-8"),
                 "/app.css": (CSS.encode(), "text/css"),
                 "/app.js": (JS.encode(), "text/javascript"),
+                "/favicon-16.png": ((Path(__file__).with_name("assets") / "favicon-16.png").read_bytes(), "image/png"),
+                "/favicon-32.png": ((Path(__file__).with_name("assets") / "favicon-32.png").read_bytes(), "image/png"),
+                "/app-icon.png": ((Path(__file__).with_name("assets") / "life-recorder-icon.png").read_bytes(), "image/png"),
+                "/apple-touch-icon.png": ((Path(__file__).with_name("assets") / "apple-touch-icon.png").read_bytes(), "image/png"),
             }
             body, ctype = assets[path]
             return self._send(200, body, ctype)

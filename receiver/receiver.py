@@ -711,12 +711,11 @@ class Inbox:
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
             if not person or not turn:
                 return False
-            matching = db.execute("""SELECT * FROM speaker_turns
-                WHERE chunk_id=? AND run_id=? AND speaker_key=?""",
-                (turn["chunk_id"], turn["run_id"], turn["speaker_key"])).fetchall()
+            # Diarization keys can recur later (A -> B -> A). Identity belongs
+            # to this chronological clip, not every occurrence of the key.
+            matching = [turn]
             db.execute("""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
-                WHERE chunk_id=? AND run_id=? AND speaker_key=?""",
-                (person_id, turn["chunk_id"], turn["run_id"], turn["speaker_key"]))
+                WHERE id=?""", (person_id, turn_id))
             turn_ids = [candidate["id"] for candidate in matching]
             placeholders = ",".join("?" for _ in turn_ids)
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)

@@ -992,6 +992,32 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(any(turn.get("run_id") for turn in turns))
             self.assertTrue(any(turn.get("preserved") and turn.get("person_id") == person["id"] for turn in turns))
 
+    def test_labeling_one_a_b_a_turn_does_not_label_the_other_a(self):
+        scratch, inbox, chunk_id = self._labeled_inbox()
+        with scratch:
+            person = inbox.create_person("Jon")
+            diarization_mod.save_result(inbox, chunk_id, {
+                "turns": [
+                    {"speaker_key": "S1", "started": 0.0, "ended": 4.0, "quality": 1.0,
+                     "embedding": [1.0] + [0.0] * 127},
+                    {"speaker_key": "S2", "started": 4.0, "ended": 8.0, "quality": 1.0,
+                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                    {"speaker_key": "S1", "started": 8.0, "ended": 12.0, "quality": 1.0,
+                     "embedding": [1.0] + [0.0] * 127},
+                ],
+                "speaker_count": 2, "processing_seconds": 0.1, "outcome": "success",
+                "speech_seconds": 12.0, "coverage": 0.6, "turn_count": 3,
+                "embedding_count": 3, "cluster_count": 2, "asr_words": 0,
+            })
+            with inbox.connect() as db:
+                turns = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started",
+                                   (chunk_id,)).fetchall()
+            self.assertTrue(inbox.label_turn(turns[0][0], person["id"]))
+            with inbox.connect() as db:
+                labels = [row[0] for row in db.execute(
+                    "SELECT person_id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,))]
+            self.assertEqual(labels, [person["id"], None, None])
+
     def test_identity_editor_starts_empty_for_zero_or_one_person(self):
         self.assertIn("No people yet", viewer_mod.JS)
         self.assertNotIn("if (person.id === turn.person_id) option.selected = true", viewer_mod.JS)
@@ -1007,6 +1033,13 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         self.assertIn("Save voice sample", viewer_mod.JS)
         self.assertIn("New person", viewer_mod.JS)
         self.assertIn("closePopover", viewer_mod.JS)
+        self.assertIn('key: chunk.id + ":" + turn.id', viewer_mod.JS)
+        self.assertIn("clipStartTime = null", viewer_mod.JS)
+        self.assertIn("clipStopTime = Number(turn.ended)", viewer_mod.JS)
+        self.assertIn('fullRecordingBtn.textContent = "Play full recording"', viewer_mod.JS)
+        self.assertIn('info.label + " · " + clipStart', viewer_mod.JS)
+        self.assertIn("card.appendChild(group.identityAnchor)", viewer_mod.JS)
+        self.assertIn("player.currentTime < clipStartTime", viewer_mod.JS)
         self.assertIn("One more confirmed voice sample needed for ", viewer_mod.JS)
         self.assertIn(".popover", viewer_mod.CSS)
 

@@ -234,6 +234,8 @@ JS = r"""
   let loadedAudioId = null;
   let audioController = null;
   let audioGeneration = 0;
+  let clipStartTime = null;
+  let clipStopTime = null;
   let dayRequest = 0;
   let view = "recordings";
   let selectedId = null;
@@ -367,21 +369,29 @@ JS = r"""
     return ((person.enrollment_reasons || []).map(reasonText).join(". ") || "Still learning this voice") + " · " + stats;
   }
   function groupTurns(chunk) {
-    const groups = [];
-    const index = new Map();
-    for (const turn of chunk.speakers || []) {
-      const key = chunk.id + ":" + (turn.run_id || "") + ":" + (turn.speaker_key || "Unknown");
-      if (!index.has(key)) {
-        const group = { key, chunk, run_id: turn.run_id, speaker_key: turn.speaker_key, turns: [], preserved: !!turn.preserved };
-        index.set(key, group);
-        groups.push(group);
-      }
-      const group = index.get(key);
-      group.turns.push(turn);
-      group.preserved = group.preserved || !!turn.preserved;
-    }
-    return groups;
+    return (chunk.speakers || []).map((turn) => ({
+      key: chunk.id + ":" + turn.id,
+      chunk,
+      run_id: turn.run_id,
+      speaker_key: turn.speaker_key,
+      turns: [turn],
+      preserved: !!turn.preserved,
+    }));
   }
+
+  player.addEventListener("timeupdate", () => {
+    if (clipStartTime != null && player.currentTime < clipStartTime) {
+      player.currentTime = clipStartTime;
+    }
+    if (clipStopTime != null && player.currentTime >= clipStopTime) {
+      player.pause();
+    }
+  });
+  player.addEventListener("play", () => {
+    if (clipStopTime != null && player.currentTime >= clipStopTime && clipStartTime != null) {
+      player.currentTime = clipStartTime;
+    }
+  });
   function renderList() {
     list.replaceChildren();
     for (const item of payload.intervals || []) {
@@ -517,6 +527,8 @@ JS = r"""
     );
     const nextAudioId = audioPath ? ((isEvent ? "event:" : "chunk:") + item.id + ":" + (isEvent ? playbackKind : "original")) : null;
     if (nextAudioId === loadedAudioId) return;
+    clipStartTime = null;
+    clipStopTime = null;
     loadedAudioId = nextAudioId;
     audioGeneration += 1;
     if (audioController) audioController.abort();
@@ -604,7 +616,7 @@ JS = r"""
     sampleBox.type = "checkbox";
     sampleBox.checked = identitySample;
     sample.appendChild(sampleBox);
-    sample.append(" Save a voice sample from this clip only if it is long enough");
+    sample.append(" Save a voice sample from this detected voice cluster if it is long enough");
     sampleBox.addEventListener("change", () => {
       identitySample = sampleBox.checked;
       if (identityMode !== "new") render();
@@ -780,8 +792,19 @@ JS = r"""
     turnsBtn.setAttribute("aria-pressed", String(detailMode === "turns"));
     transcriptBtn.addEventListener("click", () => { detailMode = "transcript"; render(); });
     turnsBtn.addEventListener("click", () => { detailMode = "turns"; render(); });
+    const fullRecordingBtn = document.createElement("button");
+    fullRecordingBtn.type = "button";
+    fullRecordingBtn.textContent = "Play full recording";
+    fullRecordingBtn.disabled = !chunk.audio_playable;
+    fullRecordingBtn.addEventListener("click", () => {
+      clipStartTime = null;
+      clipStopTime = null;
+      player.currentTime = 0;
+      player.play().catch(() => {});
+    });
     modes.appendChild(transcriptBtn);
     modes.appendChild(turnsBtn);
+    modes.appendChild(fullRecordingBtn);
     pane.appendChild(title);
     pane.appendChild(meta);
     const groups = groupTurns(chunk);
@@ -802,7 +825,10 @@ JS = r"""
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "badge pill " + info.cls;
-      pill.textContent = info.label;
+      const firstTurn = group.turns[0] || {};
+      const clipStart = Number.isFinite(Number(firstTurn.started)) ? Number(firstTurn.started).toFixed(1) : "?";
+      const clipEnd = Number.isFinite(Number(firstTurn.ended)) ? Number(firstTurn.ended).toFixed(1) : "?";
+      pill.textContent = info.label + " · " + clipStart + "–" + clipEnd + "s";
       pill.setAttribute("data-identity-key", group.key);
       pill.setAttribute("aria-expanded", String(openIdentityKey === group.key));
       pill.setAttribute("aria-haspopup", "dialog");
@@ -840,11 +866,12 @@ JS = r"""
         }
         anchor.appendChild(editor);
       }
+      group.identityAnchor = anchor;
       speakers.appendChild(anchor);
     }
-    pane.appendChild(speakers);
     pane.appendChild(modes);
     if (detailMode === "transcript") {
+      pane.appendChild(speakers);
       const body = document.createElement("p");
       body.textContent = chunk.transcript || "No transcript yet.";
       pane.appendChild(body);
@@ -857,9 +884,7 @@ JS = r"""
       for (const group of groups) {
         const card = document.createElement("div");
         card.className = "group";
-        const heading = document.createElement("div");
-        heading.textContent = groupLabel(group).label;
-        card.appendChild(heading);
+        card.appendChild(group.identityAnchor);
         for (const turn of group.turns) {
           const line = document.createElement("p");
           const start = Number.isFinite(Number(turn.started)) ? Number(turn.started).toFixed(1) : "?";
@@ -875,6 +900,8 @@ JS = r"""
             const jump = () => {
               if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
               player.currentTime = Number(turn.started) || 0;
+              clipStartTime = Number(turn.started) || 0;
+              clipStopTime = Number(turn.ended) || null;
               player.play().catch(() => {});
             };
             if (player.readyState) jump(); else player.addEventListener("loadedmetadata", jump, { once: true });

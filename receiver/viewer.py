@@ -138,8 +138,18 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
 .pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(36,95,204,.25); }
 .pill[aria-disabled="true"] { cursor: default; opacity: .85; }
+.group { position: relative; padding: 14px; }
+.group.active { border-color: #9fbbef; box-shadow: 0 0 0 1px rgba(36,95,204,.12); }
+.group-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.group-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.group-progress { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; margin: 8px 0 4px; }
+.group-progress progress { flex: 1 1 160px; min-width: 120px; width: 100%; height: 10px; max-height: 10px; appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; background: #edf0f4; overflow: hidden; }
+.group-progress progress::-webkit-progress-bar { background: #edf0f4; border-radius: 999px; }
+.group-progress progress::-webkit-progress-value, .group-progress progress::-moz-progress-bar { background: #245fcc; border-radius: 999px; }
+.group-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
 .group > p { margin: 7px 0; padding-left: 12px; border-left: 3px solid #d9dfe8; }
-.identity-anchor { position: static; display: inline-flex; }
+.identity-anchor { position: relative; display: inline-flex; min-width: 0; }
+.play-toggle[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); color: #184b9f; }
 .popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(24,33,47,.16); }
 .person-option { display: flex; width: 100%; margin: 0 0 4px; text-align: left; }
 .person-option[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); }
@@ -162,7 +172,11 @@ summary { cursor: pointer; color: var(--muted); }
   header { gap: 8px; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .header-primary { width: 100%; }
   h1 { font-size: 16px; }
-  button, select, input, summary, .row, .pill, .person-option { min-height: 44px; font-size: 16px; }
+  button, select, input, summary, .row, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
+  .group-controls { width: 100%; }
+  .group-controls button { flex: 1 1 120px; }
+  .group-progress { flex-direction: column; align-items: stretch; }
+  .group-progress progress { height: 10px; max-height: 10px; }
   #filters { width: 100%; margin: 0; padding: 0; border: 0; }
   #filters > summary { min-height: 44px; font-size: 16px; }
   #filters .filter-body { flex-direction: column; align-items: stretch; padding-top: 8px; }
@@ -242,6 +256,8 @@ JS = r"""
   let audioGeneration = 0;
   let clipStartTime = null;
   let clipStopTime = null;
+  let activeGroupKey = null;
+  let identityError = "";
   let dayRequest = 0;
   let view = "recordings";
   let selectedId = null;
@@ -373,30 +389,119 @@ JS = r"""
     if (remaining > 1) return remaining + " more confirmed voice samples needed for " + stats;
     return ((person.enrollment_reasons || []).map(reasonText).join(". ") || "Still learning this voice") + " · " + stats;
   }
+  function formatTime(value) {
+    const seconds = Math.max(0, Number(value) || 0);
+    const whole = Math.floor(seconds);
+    const minutes = Math.floor(whole / 60);
+    const rest = whole % 60;
+    return minutes + ":" + String(rest).padStart(2, "0");
+  }
+  function groupBounds(group) {
+    const turns = group.turns || [];
+    const starts = turns.map((turn) => Number(turn.started)).filter((value) => Number.isFinite(value));
+    const ends = turns.map((turn) => Number(turn.ended)).filter((value) => Number.isFinite(value));
+    return {
+      start: starts.length ? Math.min.apply(null, starts) : 0,
+      end: ends.length ? Math.max.apply(null, ends) : 0,
+    };
+  }
+  function groupTranscript(group) {
+    return (group.turns || []).map((turn) => (turn.text || "").trim()).filter(Boolean).join(" ");
+  }
+  function canMergeTurns(currentTurns, next, all) {
+    const previous = currentTurns && currentTurns[currentTurns.length - 1];
+    if (!previous || !next) return false;
+    if ((previous.run_id || "") !== (next.run_id || "")) return false;
+    if ((previous.speaker_key || "Unknown") !== (next.speaker_key || "Unknown")) return false;
+    const people = new Set();
+    for (const turn of currentTurns.concat([next])) {
+      if (turn.person_id) people.add(turn.person_id);
+    }
+    if (people.size > 1) return false;
+    const gapStart = Number(previous.ended);
+    const gapEnd = Number(next.started);
+    if (!Number.isFinite(gapStart) || !Number.isFinite(gapEnd) || gapEnd <= gapStart) return true;
+    const skip = new Set((currentTurns.concat([next])).map((turn) => turn.id));
+    return !(all || []).some((turn) => {
+      if (skip.has(turn.id)) return false;
+      if ((turn.run_id || "") === (previous.run_id || "") && (turn.speaker_key || "Unknown") === (previous.speaker_key || "Unknown")) return false;
+      const start = Number(turn.started);
+      const end = Number(turn.ended);
+      return Number.isFinite(start) && Number.isFinite(end) && start < gapEnd && end > gapStart;
+    });
+  }
   function groupTurns(chunk) {
-    return (chunk.speakers || []).map((turn) => ({
-      key: chunk.id + ":" + turn.id,
-      chunk,
-      run_id: turn.run_id,
-      speaker_key: turn.speaker_key,
-      turns: [turn],
-      preserved: !!turn.preserved,
-    }));
+    const turns = (chunk.speakers || []).slice().sort((left, right) => {
+      const start = (Number(left.started) || 0) - (Number(right.started) || 0);
+      if (start) return start;
+      const end = (Number(left.ended) || 0) - (Number(right.ended) || 0);
+      if (end) return end;
+      return String(left.id || "").localeCompare(String(right.id || ""));
+    });
+    const groups = [];
+    for (const turn of turns) {
+      const last = groups[groups.length - 1];
+      if (last && canMergeTurns(last.turns, turn, turns)) {
+        last.turns.push(turn);
+        last.preserved = last.preserved || !!turn.preserved;
+        continue;
+      }
+      groups.push({
+        key: chunk.id + ":" + turn.id,
+        chunk,
+        run_id: turn.run_id,
+        speaker_key: turn.speaker_key,
+        turns: [turn],
+        preserved: !!turn.preserved,
+      });
+    }
+    return groups;
   }
 
+  function updateCardPlayback() {
+    const cards = document.querySelectorAll(".group[data-group-key]");
+    cards.forEach((card) => {
+      const key = card.getAttribute("data-group-key");
+      const start = Number(card.getAttribute("data-start"));
+      const end = Number(card.getAttribute("data-end"));
+      const duration = Math.max(0, end - start);
+      const active = activeGroupKey === key && clipStartTime != null;
+      const elapsed = active ? Math.max(0, Math.min(duration, player.currentTime - start)) : 0;
+      card.classList.toggle("active", active && !player.paused);
+      const toggle = card.querySelector(".play-toggle");
+      const meter = card.querySelector("progress");
+      const clock = card.querySelector(".group-time");
+      if (toggle) {
+        const playing = active && !player.paused;
+        toggle.textContent = playing ? "Pause" : "Play";
+        toggle.setAttribute("aria-pressed", String(playing));
+        toggle.setAttribute("aria-label", playing ? "Pause this speaker clip" : "Play this speaker clip");
+      }
+      if (meter) {
+        meter.max = duration || 1;
+        meter.value = elapsed;
+      }
+      if (clock) clock.textContent = formatTime(elapsed) + " / " + formatTime(duration);
+    });
+  }
   player.addEventListener("timeupdate", () => {
     if (clipStartTime != null && player.currentTime < clipStartTime) {
       player.currentTime = clipStartTime;
     }
     if (clipStopTime != null && player.currentTime >= clipStopTime) {
       player.pause();
+      if (clipStartTime != null) player.currentTime = clipStopTime;
     }
+    updateCardPlayback();
   });
   player.addEventListener("play", () => {
     if (clipStopTime != null && player.currentTime >= clipStopTime && clipStartTime != null) {
       player.currentTime = clipStartTime;
     }
+    updateCardPlayback();
   });
+  player.addEventListener("pause", updateCardPlayback);
+  player.addEventListener("ended", updateCardPlayback);
   function renderList() {
     list.replaceChildren();
     for (const item of payload.intervals || []) {
@@ -535,6 +640,7 @@ JS = r"""
     );
     const nextAudioId = audioPath ? ((isEvent ? "event:" : "chunk:") + item.id + ":" + (isEvent ? playbackKind : "original")) : null;
     if (nextAudioId === loadedAudioId) return;
+    activeGroupKey = null;
     clipStartTime = null;
     clipStopTime = null;
     loadedAudioId = nextAudioId;
@@ -571,6 +677,7 @@ JS = r"""
   function closePopover(restoreFocus) {
     const key = openIdentityKey;
     openIdentityKey = null;
+    identityError = "";
     identityDraft = null;
     identityMode = "list";
     identitySample = false;
@@ -592,6 +699,7 @@ JS = r"""
       closePopover(true);
       return Promise.resolve();
     }
+    identityError = "";
     return fetch("/v1/turns/" + turn.id + "/label", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
@@ -602,8 +710,12 @@ JS = r"""
       identityDraft = null;
       identityMode = "list";
       identitySample = false;
+      identityError = "";
       openIdentityKey = null;
       return loadDay();
+    }).catch((error) => {
+      identityError = "Could not save that identity.";
+      throw error;
     });
   }
   function identityPopover(group) {
@@ -616,6 +728,7 @@ JS = r"""
     const note = document.createElement("p");
     note.className = "meta";
     note.setAttribute("aria-live", "polite");
+    if (identityError && openIdentityKey === group.key) note.textContent = identityError;
     const sampleDetails = document.createElement("details");
     const sampleSummary = document.createElement("summary");
     sampleSummary.textContent = "Voice learning";
@@ -812,10 +925,12 @@ JS = r"""
     fullRecordingBtn.textContent = "Play full recording";
     fullRecordingBtn.disabled = !chunk.audio_playable;
     fullRecordingBtn.addEventListener("click", () => {
+      activeGroupKey = null;
       clipStartTime = null;
       clipStopTime = null;
       player.currentTime = 0;
       player.play().catch(() => {});
+      updateCardPlayback();
     });
     modes.appendChild(transcriptBtn);
     modes.appendChild(turnsBtn);
@@ -840,9 +955,9 @@ JS = r"""
       const pill = document.createElement("button");
       pill.type = "button";
       pill.className = "badge pill " + info.cls;
-      const firstTurn = group.turns[0] || {};
-      const clipStart = Number.isFinite(Number(firstTurn.started)) ? Number(firstTurn.started).toFixed(1) : "?";
-      const clipEnd = Number.isFinite(Number(firstTurn.ended)) ? Number(firstTurn.ended).toFixed(1) : "?";
+      const bounds = groupBounds(group);
+      const clipStart = Number.isFinite(bounds.start) ? bounds.start.toFixed(1) : "?";
+      const clipEnd = Number.isFinite(bounds.end) ? bounds.end.toFixed(1) : "?";
       pill.textContent = info.label + " · " + clipStart + "–" + clipEnd + "s";
       pill.setAttribute("data-identity-key", group.key);
       pill.setAttribute("aria-expanded", String(openIdentityKey === group.key));
@@ -852,6 +967,7 @@ JS = r"""
         event.stopPropagation();
         if (openIdentityKey === group.key) { closePopover(true); return; }
         openIdentityKey = group.key;
+        identityError = "";
         identityDraft = currentPersonId(group) || null;
         identityMode = "list";
         identitySample = false;
@@ -899,34 +1015,74 @@ JS = r"""
       for (const group of groups) {
         const card = document.createElement("div");
         card.className = "group";
-        card.appendChild(group.identityAnchor);
-        for (const turn of group.turns) {
-          const line = document.createElement("p");
-          const start = Number.isFinite(Number(turn.started)) ? Number(turn.started).toFixed(1) : "?";
-          const end = Number.isFinite(Number(turn.ended)) ? Number(turn.ended).toFixed(1) : "?";
-          const seek = document.createElement("button");
-          seek.type = "button";
-          seek.textContent = start + "–" + end + "s";
-          seek.setAttribute("aria-label", "Play speaker turn at " + start + " seconds");
-          seek.disabled = !chunk.audio_playable;
-          seek.addEventListener("click", () => {
-            const expectedId = chunk.id;
-            const expectedGeneration = audioGeneration;
-            const jump = () => {
-              if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
-              player.currentTime = Number(turn.started) || 0;
-              clipStartTime = Number(turn.started) || 0;
-              clipStopTime = Number(turn.ended) || null;
-              player.play().catch(() => {});
-            };
-            if (player.readyState) jump(); else player.addEventListener("loadedmetadata", jump, { once: true });
-          });
-          line.appendChild(seek);
-          line.append(turn.text ? " — " + turn.text : "");
-          card.appendChild(line);
-        }
+        card.setAttribute("data-group-key", group.key);
+        const bounds = groupBounds(group);
+        card.setAttribute("data-start", String(bounds.start));
+        card.setAttribute("data-end", String(bounds.end));
+        const head = document.createElement("div");
+        head.className = "group-head";
+        head.appendChild(group.identityAnchor);
+        const controls = document.createElement("div");
+        controls.className = "group-controls";
+        const play = document.createElement("button");
+        play.type = "button";
+        play.className = "play-toggle";
+        play.textContent = "Play";
+        play.setAttribute("aria-pressed", "false");
+        play.setAttribute("aria-label", "Play this speaker clip");
+        play.disabled = !chunk.audio_playable;
+        const replay = document.createElement("button");
+        replay.type = "button";
+        replay.className = "replay";
+        replay.textContent = "Replay";
+        replay.setAttribute("aria-label", "Replay this speaker clip");
+        replay.disabled = !chunk.audio_playable;
+        const playGroup = (fromStart) => {
+          const expectedId = chunk.id;
+          const expectedGeneration = audioGeneration;
+          const startAt = Number(bounds.start) || 0;
+          const stopAt = Number(bounds.end) || 0;
+          const jump = () => {
+            if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
+            activeGroupKey = group.key;
+            clipStartTime = startAt;
+            clipStopTime = stopAt;
+            if (fromStart || player.currentTime < startAt || player.currentTime >= stopAt) player.currentTime = startAt;
+            player.play().catch(() => {});
+            updateCardPlayback();
+          };
+          if (player.readyState) jump(); else player.addEventListener("loadedmetadata", jump, { once: true });
+        };
+        play.addEventListener("click", () => {
+          if (activeGroupKey === group.key && !player.paused) {
+            player.pause();
+            updateCardPlayback();
+            return;
+          }
+          playGroup(false);
+        });
+        replay.addEventListener("click", () => playGroup(true));
+        controls.appendChild(play);
+        controls.appendChild(replay);
+        head.appendChild(controls);
+        card.appendChild(head);
+        const progress = document.createElement("div");
+        progress.className = "group-progress";
+        const meter = document.createElement("progress");
+        meter.max = Math.max(0.001, bounds.end - bounds.start);
+        meter.value = 0;
+        const clock = document.createElement("span");
+        clock.className = "group-time";
+        clock.textContent = formatTime(0) + " / " + formatTime(bounds.end - bounds.start);
+        progress.appendChild(meter);
+        progress.appendChild(clock);
+        card.appendChild(progress);
+        const body = document.createElement("p");
+        body.textContent = groupTranscript(group) || "No transcript for this clip.";
+        card.appendChild(body);
         pane.appendChild(card);
       }
+      updateCardPlayback();
     }
     const details = document.createElement("details");
     const summary = document.createElement("summary");

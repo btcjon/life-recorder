@@ -20,7 +20,7 @@ import diarization as diarization_mod
 import meetings as meetings_mod
 import receiver as receiver_mod
 import viewer as viewer_mod
-from receiver import Handler, Inbox, Receiver
+from receiver import Handler, Inbox, Receiver, review_groups
 
 EASTERN = ZoneInfo("America/New_York")
 PARAKEET_FIXTURE = {
@@ -994,6 +994,51 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(any(turn.get("run_id") for turn in turns))
             self.assertTrue(any(turn.get("preserved") and turn.get("person_id") == person["id"] for turn in turns))
 
+    def _turns(self, *rows):
+        return [
+            {
+                "id": "t%s" % index,
+                "run_id": row.get("run_id", "run"),
+                "speaker_key": row["speaker_key"],
+                "started": row["started"],
+                "ended": row["ended"],
+                "person_id": row.get("person_id"),
+            }
+            for index, row in enumerate(rows)
+        ]
+
+    def test_review_groups_merge_adjacent_same_speaker_and_keep_aba_split(self):
+        merged = review_groups(self._turns(
+            {"speaker_key": "S2", "started": 4.0, "ended": 20.0},
+            {"speaker_key": "S2", "started": 22.0, "ended": 39.6},
+            {"speaker_key": "S1", "started": 42.7, "ended": 51.0},
+            {"speaker_key": "S1", "started": 53.0, "ended": 60.0},
+        ))
+        self.assertEqual([(group[0]["speaker_key"], group[0]["started"], group[-1]["ended"]) for group in merged],
+                         [("S2", 4.0, 39.6), ("S1", 42.7, 60.0)])
+        aba = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 0.0, "ended": 4.0},
+            {"speaker_key": "S2", "started": 4.0, "ended": 8.0},
+            {"speaker_key": "S1", "started": 8.0, "ended": 12.0},
+        ))
+        self.assertEqual([group[0]["speaker_key"] for group in aba], ["S1", "S2", "S1"])
+        overlap = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 0.0, "ended": 10.0},
+            {"speaker_key": "S2", "started": 4.0, "ended": 8.0},
+            {"speaker_key": "S1", "started": 10.0, "ended": 14.0},
+        ))
+        self.assertEqual([group[0]["speaker_key"] for group in overlap], ["S1", "S2", "S1"])
+        conflict = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 0.0, "ended": 4.0, "person_id": "jon"},
+            {"speaker_key": "S1", "started": 4.0, "ended": 8.0, "person_id": "mia"},
+        ))
+        self.assertEqual(len(conflict), 2)
+        unknown = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 0.0, "ended": 4.0},
+            {"speaker_key": "S3", "started": 4.0, "ended": 8.0},
+        ))
+        self.assertEqual([group[0]["speaker_key"] for group in unknown], ["S1", "S3"])
+
     def test_labeling_one_a_b_a_turn_does_not_label_the_other_a(self):
         scratch, inbox, chunk_id = self._labeled_inbox()
         with scratch:
@@ -1020,6 +1065,32 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                     "SELECT person_id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,))]
             self.assertEqual(labels, [person["id"], None, None])
 
+    def test_labeling_merged_group_updates_only_contiguous_turns(self):
+        scratch, inbox, chunk_id = self._labeled_inbox()
+        with scratch:
+            person = inbox.create_person("Jon")
+            diarization_mod.save_result(inbox, chunk_id, {
+                "turns": [
+                    {"speaker_key": "S2", "started": 4.0, "ended": 20.0, "quality": 1.0,
+                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                    {"speaker_key": "S2", "started": 22.0, "ended": 39.6, "quality": 1.0,
+                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                    {"speaker_key": "S1", "started": 42.7, "ended": 60.0, "quality": 1.0,
+                     "embedding": [1.0] + [0.0] * 127},
+                ],
+                "speaker_count": 2, "processing_seconds": 0.1, "outcome": "success",
+                "speech_seconds": 50.9, "coverage": 0.8, "turn_count": 3,
+                "embedding_count": 3, "cluster_count": 2, "asr_words": 0,
+            })
+            with inbox.connect() as db:
+                turns = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started",
+                                   (chunk_id,)).fetchall()
+            self.assertTrue(inbox.label_turn(turns[0][0], person["id"]))
+            with inbox.connect() as db:
+                labels = [row[0] for row in db.execute(
+                    "SELECT person_id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,))]
+            self.assertEqual(labels, [person["id"], person["id"], None])
+
     def test_identity_editor_starts_empty_for_zero_or_one_person(self):
         self.assertIn("No people yet", viewer_mod.JS)
         self.assertNotIn("if (person.id === turn.person_id) option.selected = true", viewer_mod.JS)
@@ -1037,10 +1108,17 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         self.assertIn("closePopover", viewer_mod.JS)
         self.assertIn('key: chunk.id + ":" + turn.id', viewer_mod.JS)
         self.assertIn("clipStartTime = null", viewer_mod.JS)
-        self.assertIn("clipStopTime = Number(turn.ended)", viewer_mod.JS)
+        self.assertIn("clipStopTime = stopAt", viewer_mod.JS)
         self.assertIn('fullRecordingBtn.textContent = "Play full recording"', viewer_mod.JS)
         self.assertIn('info.label + " · " + clipStart', viewer_mod.JS)
-        self.assertIn("card.appendChild(group.identityAnchor)", viewer_mod.JS)
+        self.assertIn("Play", viewer_mod.JS)
+        self.assertIn("Pause", viewer_mod.JS)
+        self.assertIn("Replay", viewer_mod.JS)
+        self.assertIn("play-toggle", viewer_mod.JS)
+        self.assertIn("Could not save that identity.", viewer_mod.JS)
+        self.assertIn("activeGroupKey = null", viewer_mod.JS)
+        self.assertIn("canMergeTurns", viewer_mod.JS)
+        self.assertIn("head.appendChild(group.identityAnchor)", viewer_mod.JS)
         self.assertIn("player.currentTime < clipStartTime", viewer_mod.JS)
         self.assertIn("One more confirmed voice sample needed for ", viewer_mod.JS)
         self.assertIn(".popover", viewer_mod.CSS)

@@ -67,6 +67,76 @@ class Conflict(ValueError):
     pass
 
 
+def _turn_sort_key(turn):
+    return (float(turn["started"]), float(turn["ended"]), str(turn["id"] if "id" in turn.keys() else turn.get("id") or ""))
+
+
+def _turn_get(turn, key, default=None):
+    try:
+        if key in turn.keys():
+            value = turn[key]
+            return default if value is None else value
+    except Exception:
+        pass
+    return turn.get(key, default) if hasattr(turn, "get") else default
+
+
+def _confirmed_person_ids(turns):
+    people = set()
+    for turn in turns:
+        person_id = _turn_get(turn, "person_id")
+        if person_id:
+            people.add(person_id)
+    return people
+
+
+def _gap_has_other_speaker(turns, left, right):
+    gap_start = float(_turn_get(left, "ended"))
+    gap_end = float(_turn_get(right, "started"))
+    if gap_end <= gap_start:
+        return False
+    left_run = _turn_get(left, "run_id")
+    left_key = _turn_get(left, "speaker_key")
+    left_id = _turn_get(left, "id")
+    right_id = _turn_get(right, "id")
+    for turn in turns:
+        turn_id = _turn_get(turn, "id")
+        if turn_id in (left_id, right_id):
+            continue
+        if _turn_get(turn, "run_id") == left_run and _turn_get(turn, "speaker_key") == left_key:
+            continue
+        start = float(_turn_get(turn, "started"))
+        end = float(_turn_get(turn, "ended"))
+        if start < gap_end and end > gap_start:
+            return True
+    return False
+
+
+def review_groups(turns):
+    """Merge chronological turns only while the same run/speaker continues.
+
+    Adjacent same-key fragments keep their source interval, including pauses.
+    A different speaker, a later recurrence of the same key, overlapping other
+    speakers in a pause, or conflicting confirmed identities start a new group.
+    """
+    ordered = sorted(list(turns), key=_turn_sort_key)
+    groups = []
+    for turn in ordered:
+        if groups:
+            current = groups[-1]
+            last = current[-1]
+            same = (
+                _turn_get(last, "run_id") == _turn_get(turn, "run_id")
+                and _turn_get(last, "speaker_key") == _turn_get(turn, "speaker_key")
+            )
+            people = _confirmed_person_ids(current) | _confirmed_person_ids([turn])
+            if same and len(people) <= 1 and not _gap_has_other_speaker(ordered, last, turn):
+                current.append(turn)
+                continue
+        groups.append([turn])
+    return groups
+
+
 class Inbox:
     def __init__(self, root: Path):
         self.root = root.resolve()
@@ -711,11 +781,15 @@ class Inbox:
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
             if not person or not turn:
                 return False
-            # Diarization keys can recur later (A -> B -> A). Identity belongs
-            # to this chronological clip, not every occurrence of the key.
-            matching = [turn]
-            db.execute("""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
-                WHERE id=?""", (person_id, turn_id))
+            # Identity belongs to this contiguous same-speaker run, never a later
+            # recurrence of the same diarization key (A -> B -> A).
+            peers = db.execute("""SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started, ended, id""",
+                               (turn["chunk_id"],)).fetchall()
+            matching = next((group for group in review_groups(peers)
+                             if any(candidate["id"] == turn_id for candidate in group)), [turn])
+            placeholders = ",".join("?" for _ in matching)
+            db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
+                WHERE id IN ({placeholders})""", (person_id, *[candidate["id"] for candidate in matching]))
             turn_ids = [candidate["id"] for candidate in matching]
             placeholders = ",".join("?" for _ in turn_ids)
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)

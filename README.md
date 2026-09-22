@@ -1,8 +1,8 @@
 # Life Recorder
 
-A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 4 GiB) for playback and offline speaker diarization; selected clips can be kept longer. No paid transcription service or cloud backend is required.
+A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 4 GiB) for playback and offline speaker diarization; selected clips can be kept longer. Transcription stays on this Mac. Optional event summaries are separate and stay off unless `LIFE_RECORDER_REMOTE_SUMMARIES=1`.
 
-The loopback-only Mac viewer supports transcript search, retained-audio playback, anonymous speaker turns, manual speaker naming, and opt-in voice samples. Voice-name suggestions appear only after at least three confirmed samples across two recordings and 20 seconds of speech, and always require human confirmation.
+The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker badges, and manual speaker naming. Current behavior is [Architecture](#architecture). `INSTALL-NOTES.md` is a dated setup journal, not the source of truth.
 
 ## Requirements
 
@@ -46,11 +46,11 @@ The receiver writes the combined transcript to `life.md`, daily Markdown files t
 
 ## Mac viewer
 
-The receiver also serves a loopback-only authenticated viewer at `http://127.0.0.1:8767`. Open `open-viewer.command` from the private data directory to launch it without copying its token into the browser history. The viewer provides a day picker, transcript search, capture sessions, meeting/event hints, and pending/error counts.
+The receiver also serves a loopback-only authenticated viewer at `http://127.0.0.1:8767`. Open `open-viewer.command` from the private data directory to launch it without copying its token into the browser history. The viewer provides a day picker, transcript search, capture-session markers, sidebar event groups, speaker badges, and pending/error counts. Flat list restores one row per clip.
 
 Optional remote viewing for `lr.genr8ive.ai` stays bound to `127.0.0.1:8767`. Enable it with `--viewer-remote-host lr.genr8ive.ai` plus Cloudflare Access `--access-team-domain` and `--access-aud` (or `LIFE_RECORDER_ACCESS_TEAM_DOMAIN` / `LIFE_RECORDER_ACCESS_AUD`). The origin then accepts that exact Host, exact `https://lr.genr8ive.ai` Origin on mutations, and a verified `Cf-Access-Jwt-Assertion` RS256 JWT. Local `open-viewer.command` bearer flow is unchanged. Do not publish receiver port 8766. Install `PyJWT[crypto]` from `requirements-viewer.txt`.
 
-The viewer presents the original recordings and also derives speech events by joining nearby speech across chunk boundaries. Events omit long quiet regions while preserving enough padding for natural playback. When DeepFilterNet is configured, an event can also have an enhanced playback copy; the original recording is always retained according to the normal retention policy and remains selectable.
+The viewer presents the original recordings and also derives speech events by joining nearby speech across chunk boundaries. Those speech events are playback spans. They are not the sidebar groups. A speech event omits long quiet regions while preserving enough padding for natural playback. When DeepFilterNet is configured, an event can also have an enhanced playback copy; the original recording is always retained according to the normal retention policy and remains selectable.
 
 Enhancement is deliberately playback-only. Transcription, diarization, and voiceprint learning continue to use the original recording so denoising cannot silently change recognition evidence. Derived event files are disposable cache: the storage manager evicts them before retained originals, and the receiver can recreate original event playback from retained source audio. Enhanced copies are regenerated for newly processed events rather than automatically after cache eviction. Use `--no-vad` or `--no-enhance` to disable either optional stage.
 
@@ -64,7 +64,35 @@ Tap the recorder switch once. Recording continues while the screen is locked and
 
 The recorder pauses automatically from 10:00 PM to 5:00 AM America/New_York and resumes at 5:00 AM while the app remains in memory. iOS can still require one manual open after a reboot or force-quit.
 
-The receiver supports local Whisper, MLX Whisper, and FluidAudio Parakeet engines. This installation uses FluidAudio Parakeet; the receiver records engine/model provenance per clip. It removes common stage-direction markers and highly repetitive hallucinated noise, then writes Eastern hourly markers and session headings after 15 minutes without captured audio. Session breaks are capture-time gaps, not speaker identity. This is cleanup, not a guarantee of perfect transcription.
+The receiver supports local Whisper, MLX Whisper, and FluidAudio Parakeet engines. This installation uses FluidAudio Parakeet; the receiver records engine/model provenance per clip. It removes common stage-direction markers and highly repetitive hallucinated noise, then writes Eastern hourly markers and session headings after 15 minutes without captured audio. Session breaks are capture-time gaps, not speaker identity and not sidebar events. This is cleanup, not a guarantee of perfect transcription.
+
+## Architecture
+
+This section is the current contract. When it disagrees with `INSTALL-NOTES.md` or an older sentence in this file, this section wins.
+
+### Transcription
+
+This installation transcribes with FluidAudio Parakeet TDT v3 through `fluidaudiocli`. Whisper.cpp and an isolated MLX Whisper command remain optional engines. Each clip stores its engine and model. Markdown session headings mark 15 minutes without captured audio.
+
+### Shared decode and diarization
+
+ASR, voice-activity detection, and diarization share one 16 kHz decode of each clip. Diarization is offline. Speaker embeddings are 256-dimensional, extraction version 3. Loading a day does not enroll a voice, assign a name, or call a model.
+
+### Names and badges
+
+Automatic naming requires a profile of two accepted samples from two clips and 10 seconds of clean speech. A name is written automatically only when the best cosine score is at least 0.85 and leads the runner-up by at least 0.10. A confirmed name is a human assignment and is not replaced by a later automatic match. Automatic labels do not become enrollment samples. Sidebar badges use stored names only. A confirmed name is solid. Any other stored name is outlined and marked unconfirmed. Anonymous speaker keys are not shown.
+
+### Sidebar events
+
+Sidebar groups come from `display_blocks` in `receiver/viewer.py`. That function only arranges clips already loaded for the day. A group contains at least two transcribed clips on the same America/New_York date, and each following transcribed clip starts within 120 seconds of the previous transcribed clip's end. Blank transcripts stay inside a group only when transcribed clips on both sides join, and they do not extend the gap. A longer gap, a different local date, or an invalid timestamp is its own row. Quiet hours do not split these groups. The visible label is Event. The group id is the first 16 hex characters of the SHA-256 of the joined member ids. Opening a group does not fetch each child recording.
+
+### Event summaries
+
+Summaries stay off unless the receiver process has `LIFE_RECORDER_REMOTE_SUMMARIES=1`. One background worker handles one unchanged event at a time, newest first, after 120 seconds without a change to that event. The transcript goes to the local `grok` command on standard input, not in the process arguments. A stored summary is at most three sentences and 60 words. Transcript text over the size budget is sampled from the beginning, middle, and end and labeled a partial summary. The cache key changes when membership, order, transcript text, or the prompt changes. A speaker-name change does not invalidate it. A failure retries after 15 minutes and does not block the next event. The day request only reads the cache. Whether this Mac has the flag set is recorded in `INSTALL-NOTES.md`, not here.
+
+### Boundaries
+
+The phone uploads over HTTPS with its certificate pin. The receiver accepts uploads on port 8766 and does not serve the viewer there. The viewer listens on `127.0.0.1:8767`. Remote viewing, when enabled, is Cloudflare Access in front of that loopback port.
 
 ## Using Codex to reproduce the setup
 
@@ -72,7 +100,7 @@ The accompanying `SKILL.md` is a reusable Codex procedure. Codex can inspect and
 
 ## Security and limits
 
-The default connection is local-LAN HTTPS with certificate pinning and a 256-bit random bearer token. The receiver has no public tunnel or cloud storage built in. A private VPN is required for cellular uploads outside the home network. Anyone who can read the private runtime directory can read the token and transcript, so keep that directory private and out of backups or repositories as appropriate.
+The default upload path is local-LAN HTTPS with certificate pinning and a 256-bit random bearer token. Cellular uploads need a private VPN. The viewer stays on loopback unless optional Cloudflare Access is configured. Event summaries, when enabled, send transcript text to Grok. Audio stays in the private runtime directory. Anyone who can read that directory can read the token and transcript, so keep it private and out of backups or repositories as appropriate.
 
 ## License
 

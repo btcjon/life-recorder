@@ -27,11 +27,11 @@ Never request or store the user's Apple password, iPhone passcode, receiver toke
 
 ## Setup workflow
 
-1. Check that Xcode, Python, ffmpeg, whisper.cpp, and a GGML Whisper model are installed.
+1. Check that Xcode, Python, ffmpeg, and the selected local ASR engine are installed. This install uses FluidAudio Parakeet TDT v3 (`fluidaudiocli` and a local model directory). whisper.cpp is the optional fallback and needs a GGML model only when that engine is selected. Current viewer and summary behavior is the Architecture section of `README.md`.
 2. Build and install the app on the connected iPhone using the user's team and device identifier.
 3. Run `receiver/setup.py` with a private data directory and `--install-agent`. Keep the generated pairing page private and delete it after pairing if desired.
 4. Pair the iPhone, switch recording on, and verify a short upload and local Markdown update.
 5. For a stalled queue, inspect the receiver health endpoint and the phone's pending audio count. Opening the app while unlocked reactivates its upload manager; do not force-quit it.
 6. Keep `life.md`, audio, SQLite state, tokens, certificates, pairing pages, and device-specific validation artifacts outside Git.
 
-The phone records in one-minute chunks, pauses 10:00 PM-5:00 AM America/New_York, and queues audio while offline. The Mac receiver transcribes with local whisper.cpp, filters obvious repetitive/stage-direction hallucinations, and writes a continuous Markdown transcript with Eastern hourly markers plus session headings after 15-minute capture gaps. Those headings are not speaker labels. Reboots and force-quits require one manual app open because iOS does not provide a reliable silent microphone launch at boot. Do not enable `--mlx-command` unless that isolated venv has been proven on this host.
+The phone records in one-minute chunks, pauses 10:00 PM-5:00 AM America/New_York, and queues audio while offline. This Mac transcribes with FluidAudio Parakeet, filters obvious repetitive/stage-direction hallucinations, and writes a continuous Markdown transcript with Eastern hourly markers plus session headings after 15-minute capture gaps. Those headings are not speaker labels. Reboots and force-quits require one manual app open because iOS does not provide a reliable silent microphone launch at boot. Do not enable `--mlx-command` unless that isolated venv has been proven on this host. Do not describe `INSTALL-NOTES.md` as the live architecture.

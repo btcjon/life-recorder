@@ -1,15 +1,17 @@
 """Loopback-only authenticated transcript viewer on 127.0.0.1:8767."""
 from __future__ import annotations
 
+import hashlib
 import hmac
 import json
 import os
 import secrets
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
 from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig
 
@@ -17,6 +19,129 @@ VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
 LOCAL_HOSTS = ("127.0.0.1", "localhost")
 DEFAULT_REMOTE_HOST = "lr.genr8ive.ai"
+
+GROUP_GAP_SECONDS = 120.0
+DISPLAY_ZONE = ZoneInfo("America/New_York")
+
+
+def _chunk_start(chunk: dict) -> datetime | None:
+    raw = chunk.get("started")
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        stamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if stamp.tzinfo is None:
+        return None
+    return stamp.astimezone(timezone.utc)
+
+
+def _duration(chunk: dict) -> float:
+    try:
+        value = float(chunk.get("duration") or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    if value < 0 or value != value:
+        return 0.0
+    return value
+
+
+def _local_date(stamp: datetime):
+    return stamp.astimezone(DISPLAY_ZONE).date()
+
+
+def _local_text(stamp: datetime) -> str:
+    return stamp.astimezone(DISPLAY_ZONE).strftime("%Y-%m-%d %H:%M %Z")
+
+
+def _has_transcript(chunk: dict) -> bool:
+    return bool(str(chunk.get("transcript") or "").strip())
+
+
+def _block_id(ids: list[str]) -> str:
+    return hashlib.sha256(",".join(ids).encode()).hexdigest()[:16]
+
+
+def display_blocks(chunks: list[dict]) -> list[dict]:
+    """Group nearby transcribed clips for the sidebar. Display only; nothing is stored."""
+    ordered = sorted(
+        enumerate(chunks),
+        key=lambda item: (
+            (0, _chunk_start(item[1]).timestamp(), str(item[1].get("id") or ""))
+            if _chunk_start(item[1]) is not None
+            else (1, item[0], str(item[1].get("id") or ""))
+        ),
+    )
+    blocks: list[dict] = []
+    cluster: list[dict] = []
+    pending: list[dict] = []
+    transcribed = 0
+
+    def emit_ordinary(items: list[dict]) -> None:
+        for item in items:
+            blocks.append({"kind": "chunk", "chunk_id": item.get("id")})
+
+    def close_cluster() -> None:
+        nonlocal cluster, pending, transcribed
+        if transcribed >= 2:
+            ids = [str(item.get("id")) for item in cluster]
+            start = _chunk_start(cluster[0])
+            last = cluster[-1]
+            end = _chunk_start(last) + timedelta(seconds=_duration(last))
+            preview = next(
+                (str(item.get("transcript") or "").strip() for item in cluster if _has_transcript(item)),
+                "",
+            )
+            blocks.append({
+                "kind": "event",
+                "id": _block_id(ids),
+                "chunk_ids": [item.get("id") for item in cluster],
+                "started_local": _local_text(start),
+                "ended_local": _local_text(end),
+                "clip_count": len(cluster),
+                "duration": sum(_duration(item) for item in cluster),
+                "preview": preview,
+            })
+        else:
+            emit_ordinary(cluster)
+        emit_ordinary(pending)
+        cluster = []
+        pending = []
+        transcribed = 0
+
+    for _, chunk in ordered:
+        stamp = _chunk_start(chunk)
+        if stamp is None:
+            close_cluster()
+            emit_ordinary([chunk])
+            continue
+        if not _has_transcript(chunk):
+            pending.append(chunk)
+            continue
+        if not cluster:
+            emit_ordinary(pending)
+            pending = []
+            cluster = [chunk]
+            transcribed = 1
+            continue
+        previous = next(item for item in reversed(cluster) if _has_transcript(item))
+        previous_end = _chunk_start(previous) + timedelta(seconds=_duration(previous))
+        gap = (stamp - previous_end).total_seconds()
+        same_day = _local_date(stamp) == _local_date(_chunk_start(previous))
+        if gap <= GROUP_GAP_SECONDS and same_day:
+            cluster.extend(pending)
+            pending = []
+            cluster.append(chunk)
+            transcribed += 1
+        else:
+            close_cluster()
+            cluster = [chunk]
+            transcribed = 1
+    close_cluster()
+    return blocks
+
+
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
@@ -64,6 +189,7 @@ APP = """<!doctype html>
     <div class="filter-body">
       <label>Search <input id="search" type="search" placeholder="Search recordings"></label>
       <label><input id="show-all" type="checkbox"> Show quiet/pending</label>
+      <label><input id="flat-list" type="checkbox"> Flat list</label>
     </div>
   </details>
   <p id="status" aria-live="polite">Loading</p>
@@ -119,7 +245,15 @@ header label { display: flex; gap: 6px; align-items: center; color: var(--muted)
 #status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
 #library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
 aside, #pane, #people-view { overflow: auto; min-height: 0; }
-aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px 12px; background: var(--rail); border-right: 1px solid var(--line); }
+aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 8px; background: var(--rail); border-right: 1px solid var(--line); }
+aside .row { padding: 6px 8px; margin: 0 0 4px; border-radius: 8px; line-height: 1.25; }
+aside .preview { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+aside .event { margin: 0 0 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+aside .event-toggle { width: 100%; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; text-align: left; font-weight: 650; line-height: 1.25; }
+aside .event .row { margin: 4px 0 0; }
+aside .event-people { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.badge.unconfirmed { background: transparent; border: 1px solid var(--line); color: var(--muted); }
+.event-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; line-height: 1.35; max-height: 4.05em; margin-top: 4px; }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
 #pane > * { max-width: 860px; }
 #people-view { padding: 28px clamp(22px, 5vw, 64px) 100px; }
@@ -173,7 +307,7 @@ summary { cursor: pointer; color: var(--muted); }
   header { gap: 8px; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .header-primary { width: 100%; }
   h1 { font-size: 16px; }
-  button, select, input, summary, .row, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
+  button, select, input, summary, .row, .event-toggle, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
   .group-controls { width: 100%; }
   .group-controls button { flex: 1 1 120px; }
   .group-progress { flex-direction: column; align-items: stretch; }
@@ -238,6 +372,8 @@ JS = r"""
   const pane = document.getElementById("pane");
   const search = document.getElementById("search");
   const showAll = document.getElementById("show-all");
+  const flatList = document.getElementById("flat-list");
+  const expandedBlocks = new Set();
   const peoplePane = document.getElementById("people");
   const peopleView = document.getElementById("people-view");
   const library = document.getElementById("library");
@@ -593,6 +729,10 @@ JS = r"""
   });
   player.addEventListener("pause", updateCardPlayback);
   player.addEventListener("ended", updateCardPlayback);
+  function recordedLength(seconds) {
+    const total = Math.max(0, Math.round(Number(seconds) || 0));
+    return total >= 60 ? Math.round(total / 60) + " min" : total + "s";
+  }
   function renderList() {
     list.replaceChildren();
     for (const item of payload.intervals || []) {
@@ -615,42 +755,18 @@ JS = r"""
       list.appendChild(node);
     }
     const chunks = visibleChunks();
-    // Speech events are internal processing artifacts. The source recordings
-    // carry transcripts, speaker clips, and assignment controls, so listing
-    // both creates duplicate rows with mostly empty detail screens.
-    const events = [];
-    const eventRows = document.createDocumentFragment();
+    const visible = new Set(chunks.map((chunk) => chunk.id));
+    const byId = new Map((payload.chunks || []).map((chunk) => [chunk.id, chunk]));
+    const rendered = new Set();
     if (!isMobile() && !selectedId && chunks[0]) { selectedId = chunks[0].id; selectedKind = "chunk"; }
-    for (const item of events) {
-      const row = document.createElement("button");
-      row.type = "button";
-      row.className = "row";
-      row.id = "event-" + item.id;
-      row.setAttribute("aria-current", selectedKind === "event" && item.id === selectedId ? "true" : "false");
-      const title = document.createElement("div");
-      title.textContent = (item.started_local || item.started || "Speech") + " · " + Number(item.playable_duration || item.duration || 0).toFixed(0) + "s";
-      const peek = document.createElement("div");
-      peek.className = "preview meta";
-      peek.textContent = "Speech event";
-      const audioNote = document.createElement("div");
-      audioNote.className = "meta";
-      audioNote.textContent = item.audio_playable ? (item.enhanced_playable ? "Original and enhanced audio" : "Original audio") : "Audio not kept";
-      row.appendChild(title);
-      row.appendChild(peek);
-      row.appendChild(audioNote);
-      row.addEventListener("click", () => {
-        selectedId = item.id;
-        selectedKind = "event";
-        openIdentityKey = null;
-        if (isMobile()) {
-          listScroll = list.scrollTop || window.scrollY || 0;
-          mobileDetailOpen = true;
-        }
-        render();
-      });
-      eventRows.appendChild(row);
-    }
-    for (const chunk of chunks) {
+    const flat = !!(flatList && flatList.checked);
+    const blocks = flat
+      ? chunks.map((chunk) => ({ kind: "chunk", chunk_id: chunk.id }))
+      : (payload.display_blocks || chunks.map((chunk) => ({ kind: "chunk", chunk_id: chunk.id })));
+    let shown = 0;
+    const appendChunk = (chunk, parent) => {
+      if (!chunk || rendered.has(chunk.id)) return;
+      rendered.add(chunk.id);
       const row = document.createElement("button");
       row.type = "button";
       row.className = "row";
@@ -661,12 +777,15 @@ JS = r"""
       const peek = document.createElement("div");
       peek.className = "preview meta";
       peek.textContent = preview(chunk.transcript);
-      const audioNote = document.createElement("div");
-      audioNote.className = "meta";
-      audioNote.textContent = chunk.status === "pending" ? "Processing" : (chunk.status !== "complete" ? "Processing failed" : (chunk.audio_playable ? "Audio available" : "Audio not kept"));
       row.appendChild(title);
       row.appendChild(peek);
-      row.appendChild(audioNote);
+      const audioState = chunk.status === "pending" ? "Processing" : (chunk.status !== "complete" ? "Processing failed" : (chunk.audio_playable ? "" : "Audio not kept"));
+      if (audioState) {
+        const audioNote = document.createElement("div");
+        audioNote.className = "meta";
+        audioNote.textContent = audioState;
+        row.appendChild(audioNote);
+      }
       row.addEventListener("click", () => {
         if (selectedKind !== "chunk" || selectedId !== chunk.id) openIdentityKey = null;
         selectedId = chunk.id;
@@ -681,10 +800,92 @@ JS = r"""
           if (back) back.focus();
         }
       });
-      list.appendChild(row);
+      parent.appendChild(row);
+      shown += 1;
+    };
+    for (const block of blocks) {
+      if (!flat && block.kind === "event") {
+        const members = (block.chunk_ids || []).map((id) => byId.get(id)).filter((chunk) => chunk && visible.has(chunk.id));
+        const named = members.filter((chunk) => (chunk.transcript || "").trim());
+        if (named.length >= 2) {
+          const box = document.createElement("div");
+          box.className = "event";
+          const toggle = document.createElement("button");
+          toggle.type = "button";
+          toggle.className = "event-toggle";
+          const open = expandedBlocks.has(block.id);
+          toggle.setAttribute("aria-expanded", open ? "true" : "false");
+          if (!open && members.some((chunk) => selectedKind === "chunk" && chunk.id === selectedId)) {
+            toggle.setAttribute("aria-current", "true");
+          }
+          const title = document.createElement("div");
+          title.textContent = "Event · " + (block.started_local || "") + " – " + (block.ended_local || "");
+          const meta = document.createElement("div");
+          meta.className = "meta";
+          const seconds = members.reduce((sum, chunk) => sum + (Number(chunk.duration) || 0), 0);
+          meta.textContent = members.length + " clips · " + recordedLength(seconds);
+          toggle.appendChild(title);
+          toggle.appendChild(meta);
+          const people = document.createElement("div");
+          people.className = "event-people";
+          const speakers = block.speakers || [];
+          if (!speakers.length) {
+            const unnamed = document.createElement("div");
+            unnamed.className = "meta";
+            unnamed.textContent = "No named speakers yet.";
+            toggle.appendChild(unnamed);
+          } else {
+            for (const person of speakers) {
+              const badge = document.createElement("span");
+              badge.className = "badge " + (person.confirmed ? "confirmed" : "unconfirmed");
+              badge.textContent = person.name;
+              if (!person.confirmed) badge.setAttribute("aria-label", person.name + ", unconfirmed");
+              people.appendChild(badge);
+            }
+            toggle.appendChild(people);
+          }
+          if (block.summary_state === "ready" && block.summary) {
+            if (block.summary_coverage === "sampled") {
+              const partial = document.createElement("div");
+              partial.className = "meta";
+              partial.textContent = "Partial summary.";
+              toggle.appendChild(partial);
+            }
+            const summary = document.createElement("div");
+            summary.className = "event-summary";
+            summary.textContent = block.summary;
+            toggle.appendChild(summary);
+          } else {
+            const peek = document.createElement("div");
+            peek.className = "preview meta";
+            peek.textContent = "Excerpt · " + preview(block.preview || named[0].transcript);
+            toggle.appendChild(peek);
+            const status = document.createElement("div");
+            status.className = "meta";
+            status.textContent = block.summary_state === "off" ? "AI summary off"
+              : (block.summary_state === "unavailable" ? "Summary unavailable" : "Summary pending");
+            toggle.appendChild(status);
+          }
+          toggle.addEventListener("click", () => {
+            if (expandedBlocks.has(block.id)) expandedBlocks.delete(block.id);
+            else expandedBlocks.add(block.id);
+            renderList();
+          });
+          box.appendChild(toggle);
+          if (open) {
+            for (const chunk of members) appendChunk(chunk, box);
+          }
+          list.appendChild(box);
+          shown += 1;
+          continue;
+        }
+        for (const chunk of members) appendChunk(chunk, list);
+        continue;
+      }
+      const chunk = byId.get(block.chunk_id);
+      if (chunk && visible.has(chunk.id)) appendChunk(chunk, list);
     }
-    list.appendChild(eventRows);
-    if (!chunks.length && !events.length) {
+    if (!shown) {
       const empty = document.createElement("p");
       empty.className = "meta";
       empty.textContent = "No recordings match this day or search.";
@@ -1261,6 +1462,7 @@ JS = r"""
   day.addEventListener("change", loadDay);
   search.addEventListener("input", render);
   showAll.addEventListener("change", render);
+  if (flatList) flatList.addEventListener("change", renderList);
   playOriginal.addEventListener("click", () => { playbackKind = "original"; render(); });
   playEnhanced.addEventListener("click", () => { playbackKind = "enhanced"; render(); });
   window.addEventListener("resize", () => {

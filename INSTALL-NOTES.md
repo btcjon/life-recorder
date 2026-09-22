@@ -1,5 +1,18 @@
 # Life Recorder Mac receiver install notes
 
+This file is a point-in-time journal. It is not the architecture source of truth. Current behavior is the Architecture section of `README.md`.
+
+Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
+
+## Current install (2026-09-22)
+
+- Data directory: `~/Library/Application Support/LifeRecorder`
+- Upload listener: port 8766. Viewer: `127.0.0.1:8767`
+- Launch agent `com.browseruse.life-recorder.receiver` has `LIFE_RECORDER_REMOTE_SUMMARIES=1`, so event summaries run on this Mac. The code default is off.
+- Sidebar grouping, speaker badges, and cached summaries are specified in `README.md`.
+
+## 2026-09-19 journal
+
 Date: 2026-09-19. Host: local Apple Silicon Mac (`/opt/homebrew` present).
 Mac receiver configured by worker; iPhone build and installation checks performed by lead.
 

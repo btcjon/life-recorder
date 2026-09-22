@@ -29,6 +29,7 @@ import detector as detector_mod
 import meetings as meetings_mod
 import viewer as viewer_mod
 import decoded_audio
+import event_summaries
 import diarization as diarization_mod
 import vad as vad_mod
 import voice_id
@@ -589,6 +590,11 @@ class Inbox:
                 "reasons": json.loads(row["reasons"] or "[]"),
                 "speakers": None,
             })
+        display_blocks = viewer_mod.display_blocks(chunks)
+        with self.connect() as db:
+            display_blocks = event_summaries.decorate(
+                db, display_blocks, {chunk["id"]: chunk for chunk in chunks},
+            )
         return {
             "day": day,
             "sessions": sessions,
@@ -599,6 +605,7 @@ class Inbox:
             "speakers": None,
             "people": self.people(),
             "events": events,
+            "display_blocks": display_blocks,
             "activity_shadow": self.activity_shadow_summary(start_utc, end_utc),
         }
 
@@ -1079,6 +1086,8 @@ def main():
     diarization_mod.refresh_decoded_pins(inbox)
     identity_thread = threading.Thread(target=voice_id.voice_worker, args=(inbox, stop), daemon=True)
     identity_thread.start()
+    summary_thread = threading.Thread(target=event_summaries.worker, args=(inbox, stop), daemon=True)
+    summary_thread.start()
     viewer_mod.start_viewer(inbox, remote=remote)
     print(f"Receiver listening on {args.host}:{args.port}; local transcripts: {inbox.root / 'life.md'}", flush=True)
     try:
@@ -1088,6 +1097,7 @@ def main():
     finally:
         stop.set()
         identity_thread.join(timeout=5)
+        summary_thread.join(timeout=5)
         if inbox.viewer_server:
             inbox.viewer_server.shutdown()
             inbox.viewer_server.server_close()

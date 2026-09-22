@@ -691,10 +691,9 @@ class PersistenceAndPlaybackTests(unittest.TestCase):
         self.assertIn("playable_duration", viewer_mod.JS)
         self.assertIn("seconds playable", viewer_mod.JS)
         self.assertIn("Search recordings", viewer_mod.APP)
-        self.assertIn("const events = [];", viewer_mod.JS)
+        self.assertNotIn("for (const item of payload.events", viewer_mod.JS)
+        self.assertNotIn("list.appendChild(eventRows)", viewer_mod.JS)
         self.assertNotIn("const stillEvent", viewer_mod.JS)
-        self.assertLess(viewer_mod.JS.index('for (const chunk of chunks)'),
-                        viewer_mod.JS.index('list.appendChild(eventRows)'))
 
 
 if __name__ == "__main__":

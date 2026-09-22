@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+
+import decoded_audio
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -116,16 +118,15 @@ def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tu
     if not config.ffmpeg:
         raise ValueError("ffmpeg is required")
     token = uuid.uuid4().hex
-    wav = work / f"{row['id']}-{token}.wav"
     result_file = work / f"{row['id']}-{token}.json"
     prefix = work / f"{row['id']}-{token}"
     engine = config.engine
+    lease = None
     try:
-        subprocess.run(
-            [config.ffmpeg, "-nostdin", "-loglevel", "error", "-y", "-i", row["path"],
-             "-ar", "16000", "-ac", "1", str(wav)],
-            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
+        lease = decoded_audio.acquire(
+            config.ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run,
         )
+        wav = lease.path
         if engine == "parakeet":
             cli = config.parakeet_cli or DEFAULT_PARAKEET_CLI
             model_dir = config.parakeet_model_dir or DEFAULT_PARAKEET_MODEL_DIR
@@ -181,6 +182,7 @@ def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tu
         whisper_json.unlink(missing_ok=True)
         return text, {"engine": "whisper", "model": str(config.model), "summary": {}}
     finally:
-        wav.unlink(missing_ok=True)
+        if lease is not None:
+            lease.release()
         result_file.unlink(missing_ok=True)
         prefix.with_suffix(".json").unlink(missing_ok=True)

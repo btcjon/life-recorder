@@ -54,8 +54,9 @@ class ActivityShadowTests(unittest.TestCase):
         with self.inbox.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
             cols = {row[1] for row in db.execute("PRAGMA table_info(chunks)")}
-        self.assertEqual(version, 6)
+        self.assertEqual(version, 8)
         self.assertIn("activity_decision", cols)
+        self.assertIn("voice_extract_version", cols)
 
     def test_valid_hold_is_stored_and_invalid_does_not_reject(self):
         hold = "v=1;d=would_hold;c=1;w=3000;e=3000;rms=-70.00;pk=-50.00;r=quiet"

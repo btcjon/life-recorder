@@ -1,6 +1,7 @@
 """Manual meeting events, derived intervals, and conservative automatic closure."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -10,7 +11,7 @@ SESSION_GAP = timedelta(minutes=15)
 MAX_MEETING = timedelta(hours=4)
 MAX_BODY = 4 * 1024
 MAX_FUTURE = timedelta(minutes=5)
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 ACTIVITY_VERSION = 1
 HOLD_RMS_DBFS = -60.0
 HOLD_PEAK_DBFS = -45.0
@@ -91,6 +92,7 @@ def migrate_schema(db) -> None:
         "activity_rms_dbfs": "REAL",
         "activity_peak_dbfs": "REAL",
         "activity_reason": "TEXT",
+        "voice_extract_version": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, declaration in additions.items():
         if name not in cols:
@@ -190,8 +192,100 @@ def migrate_schema(db) -> None:
         event_id TEXT NOT NULL, chunk_id TEXT NOT NULL, start_seconds REAL NOT NULL,
         end_seconds REAL NOT NULL, PRIMARY KEY (event_id, chunk_id, start_seconds, end_seconds)
     )""")
+    sample_cols = {row[1] for row in db.execute("PRAGMA table_info(voice_samples)")}
+    if sample_cols and "vector_id" not in sample_cols:
+        db.execute("ALTER TABLE voice_samples ADD COLUMN vector_id TEXT")
+    if sample_cols and "status" not in sample_cols:
+        db.execute("ALTER TABLE voice_samples ADD COLUMN status TEXT NOT NULL DEFAULT 'accepted'")
+    if sample_cols and "legacy" not in sample_cols:
+        db.execute("ALTER TABLE voice_samples ADD COLUMN legacy INTEGER NOT NULL DEFAULT 1")
+    if sample_cols and "source_key" not in sample_cols:
+        db.execute("ALTER TABLE voice_samples ADD COLUMN source_key TEXT")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_vectors (
+        id TEXT PRIMARY KEY, turn_id TEXT NOT NULL, run_id TEXT NOT NULL, chunk_id TEXT NOT NULL,
+        speaker_key TEXT NOT NULL, started REAL NOT NULL, ended REAL NOT NULL, duration REAL NOT NULL,
+        quality REAL, overlap INTEGER NOT NULL DEFAULT 0, timed INTEGER NOT NULL DEFAULT 0,
+        legacy INTEGER NOT NULL DEFAULT 0, embedding_json TEXT NOT NULL, extraction_version INTEGER NOT NULL,
+        interval_key TEXT NOT NULL, enrolled INTEGER NOT NULL DEFAULT 0, person_id TEXT, created_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_tracks (
+        id TEXT PRIMARY KEY, chunk_id TEXT NOT NULL, status TEXT NOT NULL, frozen_reason TEXT,
+        anchor_person_id TEXT, created_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_assignments (
+        id TEXT PRIMARY KEY, vector_id TEXT NOT NULL, track_id TEXT, state TEXT NOT NULL,
+        version INTEGER NOT NULL, evidence_json TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+        created_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_calibration (
+        id INTEGER PRIMARY KEY CHECK (id = 1), status TEXT NOT NULL, updated_at REAL NOT NULL
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_jobs (
+        chunk_id TEXT PRIMARY KEY,
+        reason TEXT NOT NULL,
+        enqueued_at REAL NOT NULL,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        last_error TEXT
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_recover_skip (
+        chunk_id TEXT PRIMARY KEY
+    )""")
+    db.execute("""CREATE TABLE IF NOT EXISTS voice_maintenance (
+        id INTEGER PRIMARY KEY CHECK (id = 1),
+        recover_complete INTEGER NOT NULL DEFAULT 0,
+        startup_sweep_complete INTEGER NOT NULL DEFAULT 0
+    )""")
+    db.execute(
+        "INSERT OR IGNORE INTO voice_maintenance (id, recover_complete, startup_sweep_complete) VALUES (1, 0, 0)"
+    )
+    _purge_legacy_voice_embeddings(db)
     if version < SCHEMA_VERSION:
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+
+
+def _current_embedding(raw) -> bool:
+    try:
+        values = json.loads(raw)
+        numbers = [float(value) for value in values]
+    except (TypeError, ValueError, json.JSONDecodeError, OverflowError):
+        return False
+    if len(numbers) != 256:
+        return False
+    if not all(number == number and number not in (float("inf"), float("-inf")) for number in numbers):
+        return False
+    return sum(number * number for number in numbers) > 0
+
+
+def _purge_legacy_voice_embeddings(db) -> bool:
+    """Drop rho128 vectors and the automatic names they wrote. Confirmed names stay."""
+    vector_ids = [
+        row["id"] for row in db.execute(
+            "SELECT id, embedding_json, extraction_version FROM voice_vectors"
+        )
+        if int(row["extraction_version"] or 0) < 3 or not _current_embedding(row["embedding_json"])
+    ]
+    for offset in range(0, len(vector_ids), 400):
+        batch = vector_ids[offset:offset + 400]
+        placeholders = ",".join("?" for _ in batch)
+        db.execute(
+            f"UPDATE voice_assignments SET active=0, state='retracted' WHERE vector_id IN ({placeholders})",
+            batch,
+        )
+        db.execute(f"DELETE FROM voice_vectors WHERE id IN ({placeholders})", batch)
+    sample_ids = [
+        row["id"] for row in db.execute("SELECT id, embedding_json FROM voice_samples")
+        if not _current_embedding(row["embedding_json"])
+    ]
+    for offset in range(0, len(sample_ids), 400):
+        batch = sample_ids[offset:offset + 400]
+        placeholders = ",".join("?" for _ in batch)
+        db.execute(f"DELETE FROM voice_samples WHERE id IN ({placeholders})", batch)
+    removed = bool(vector_ids or sample_ids)
+    if removed:
+        db.execute(
+            "UPDATE speaker_turns SET person_id=NULL, label_source=NULL WHERE label_source='automatic'"
+        )
+    return removed
 
 
 

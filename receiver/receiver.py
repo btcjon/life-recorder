@@ -28,8 +28,10 @@ import asr as asr_mod
 import detector as detector_mod
 import meetings as meetings_mod
 import viewer as viewer_mod
+import decoded_audio
 import diarization as diarization_mod
 import vad as vad_mod
+import voice_id
 
 MAX_UPLOAD = 32 * 1024 * 1024
 SESSION_GAP_SECONDS = 15 * 60
@@ -113,11 +115,11 @@ def _gap_has_other_speaker(turns, left, right):
 
 
 def review_groups(turns):
-    """Merge chronological turns only while the same run/speaker continues.
+    """One stretch per run of the same voice.
 
-    Adjacent same-key fragments keep their source interval, including pauses.
-    A different speaker, a later recurrence of the same key, overlapping other
-    speakers in a pause, or conflicting confirmed identities start a new group.
+    Consecutive turns merge across silence while the run and speaker key stay
+    the same. A different speaker, another speaker in the pause, or two
+    confirmed names start a new stretch.
     """
     ordered = sorted(list(turns), key=_turn_sort_key)
     groups = []
@@ -221,6 +223,7 @@ class Inbox:
                      None if not activity else activity["rms_dbfs"],
                      None if not activity else activity["peak_dbfs"],
                      None if not activity else activity["reason"]))
+            diarization_mod.refresh_decoded_pins(self)
             return True
 
     def complete(self, chunk_id: str, transcript: str, provenance: dict | None = None):
@@ -464,9 +467,16 @@ class Inbox:
             return {row["status"]: row["n"] for row in db.execute(
                 "SELECT status,count(*) AS n FROM chunks GROUP BY status")}
 
+    def list_chunks(self):
+        """Recording rows for the day list, without transcripts' word timings."""
+        with self.connect() as db:
+            return db.execute("""SELECT id,device,started,duration,path,status,error,transcript,
+                word_count,engine,audio_state,audio_expires_at,audio_pinned,diarization_status,
+                activity_decision,vad_status FROM chunks ORDER BY started,id""").fetchall()
+
     def viewer_days(self) -> list[str]:
         days = set()
-        for row in self.all_chunks():
+        for row in self.list_chunks():
             start, end = meetings_mod.chunk_span(row)
             days.update(meetings_mod.eastern_dates(start, end))
         with self.connect() as db:
@@ -488,7 +498,12 @@ class Inbox:
         session_number = 0
         pending = 0
         errors = 0
-        for row in self.all_chunks():
+        rows = self.list_chunks()
+        with self.connect() as db:
+            turn_counts = {row[0]: row[1] for row in db.execute(
+                "SELECT chunk_id, COUNT(*) FROM speaker_turns GROUP BY chunk_id"
+            )}
+        for row in rows:
             started, finished = meetings_mod.chunk_span(row)
             if row["status"] == "pending":
                 pending += 1
@@ -512,10 +527,8 @@ class Inbox:
                 "audio_playable": row["audio_state"] == "present" and Path(row["path"]).is_file(),
                 "audio_expires_at": row["audio_expires_at"],
                 "audio_pinned": bool(row["audio_pinned"]),
-                "words": json.loads(row["words_json"] or "[]"),
                 "diarization_status": row["diarization_status"],
-                "diarization": self.diarization_summary(row["id"]),
-                "speakers": self.speaker_turns(row["id"]),
+                "speaker_turn_count": turn_counts.get(row["id"], 0),
             })
         events = []
         with self.connect() as db:
@@ -596,7 +609,7 @@ class Inbox:
         unknown = 0
         vad_complete = 0
         hold_vad_positive = 0
-        for row in self.all_chunks():
+        for row in self.list_chunks():
             started, finished = meetings_mod.chunk_span(row)
             if finished <= start_utc or started >= end_utc:
                 continue
@@ -658,6 +671,7 @@ class Inbox:
 
     def speaker_turns(self, chunk_id: str):
         with self.connect() as db:
+            db.execute("PRAGMA query_only=ON")
             chunk = db.execute("SELECT words_json FROM chunks WHERE id=?", (chunk_id,)).fetchone()
             rows = db.execute("""SELECT t.id,t.run_id,t.speaker_key,t.started,t.ended,t.quality,
                 t.person_id,t.label_source,p.name,t.embedding_json FROM speaker_turns t
@@ -667,12 +681,11 @@ class Inbox:
                 ORDER BY created_at DESC LIMIT 1""", (chunk_id,)).fetchone()
         latest_run = latest["id"] if latest else None
         words = json.loads(chunk["words_json"] or "[]") if chunk else []
-        profiles = self.voice_profiles()
         output = []
         for row in rows:
             item = dict(row)
             item["preserved"] = bool(item.get("person_id") and latest_run and item.get("run_id") != latest_run)
-            embedding = json.loads(item.pop("embedding_json") or "null")
+            item.pop("embedding_json", None)
             selected = []
             for word in words:
                 try:
@@ -682,76 +695,51 @@ class Inbox:
                 if item["started"] <= (start + end) / 2 <= item["ended"]:
                     selected.append(str(word.get("word") or ""))
             item["text"] = " ".join(selected).strip()
-            reasons = []
-            if item["person_id"]:
-                reasons.append("confirmed")
-            elif not isinstance(embedding, list):
-                reasons.append("no_embedding")
-            elif not profiles:
-                reasons.append("no_enrolled_voiceprints")
-            else:
-                ranked = sorted(((cosine(embedding, profile["centroid"]), profile)
-                                 for profile in profiles), reverse=True, key=lambda pair: pair[0])
-                score = ranked[0][0]
-                margin = score - ranked[1][0] if len(ranked) > 1 else score
-                item["suggestion_score"] = round(score, 3)
-                item["suggestion_margin"] = round(margin, 3)
-                if score < 0.60:
-                    reasons.append("score_below_0.60")
-                if len(ranked) > 1 and margin < 0.10:
-                    reasons.append("margin_below_0.10")
-                if not reasons:
-                    item["suggested_person_id"] = ranked[0][1]["id"]
-                    item["suggested_name"] = ranked[0][1]["name"]
-                    reasons.append("matched")
-            item["suggestion_reasons"] = reasons
             output.append(item)
+        with self.connect() as db:
+            voice_id.annotate_turns(db, output)
+            clean = voice_id.eligible_clean_seconds(db, [item["id"] for item in output])
+        for item in output:
+            item["clean_seconds"] = clean.get(item["id"], 0.0)
         return output
 
-    def voice_profiles(self):
+    def chunk_review(self, chunk_id: str):
+        """Speakers for one opened recording. This read does not enroll or auto-tag."""
         with self.connect() as db:
-            rows = db.execute("""SELECT s.person_id,p.name,s.embedding_json,s.duration,t.chunk_id
-                FROM voice_samples s JOIN people p ON p.id=s.person_id
-                JOIN speaker_turns t ON t.id=s.turn_id ORDER BY s.confirmed_at""").fetchall()
-        grouped = {}
-        for row in rows:
-            embedding = json.loads(row["embedding_json"])
-            if (not isinstance(embedding, list) or len(embedding) != 128
-                    or not all(math.isfinite(float(value)) for value in embedding)):
-                continue
-            entry = grouped.setdefault(row["person_id"], {"id": row["person_id"], "name": row["name"],
-                                                           "vectors": [], "chunks": set(), "seconds": 0.0})
-            entry["vectors"].append(embedding); entry["chunks"].add(row["chunk_id"])
-            entry["seconds"] += float(row["duration"])
-        profiles = []
-        for entry in grouped.values():
-            if len(entry["vectors"]) < 3 or len(entry["chunks"]) < 2 or entry["seconds"] < 20:
-                continue
-            centroid = [sum(vector[i] for vector in entry["vectors"]) / len(entry["vectors"]) for i in range(128)]
-            profiles.append({"id": entry["id"], "name": entry["name"], "centroid": centroid})
-        return profiles
+            db.execute("PRAGMA query_only=ON")
+            row = db.execute(
+                "SELECT id, transcript, diarization_status FROM chunks WHERE id=?",
+                (chunk_id,),
+            ).fetchone()
+            pending = voice_id.chunk_voice_pending(db, chunk_id) if row else False
+        if not row:
+            return None
+        return {
+            "id": chunk_id,
+            "transcript": row["transcript"] or "",
+            "diarization_status": row["diarization_status"],
+            "diarization": self.diarization_summary(chunk_id),
+            "speakers": self.speaker_turns(chunk_id),
+            "voice_pending": pending,
+            "people": self.people(),
+        }
 
     def people(self):
         with self.connect() as db:
+            calibrated = voice_id.automation_enabled(db)
             rows = db.execute("""SELECT p.id,p.name,
-                COUNT(DISTINCT s.id) AS sample_count,
-                COUNT(DISTINCT t.chunk_id) AS clip_count,
-                COALESCE(SUM(s.duration),0) AS sample_seconds
+                COUNT(DISTINCT CASE WHEN COALESCE(s.legacy,0)=0 AND COALESCE(s.status,'accepted')='accepted' THEN s.id END) AS sample_count,
+                COUNT(DISTINCT CASE WHEN COALESCE(s.legacy,0)=0 AND COALESCE(s.status,'accepted')='accepted' THEN t.chunk_id END) AS clip_count,
+                COALESCE(SUM(CASE WHEN COALESCE(s.legacy,0)=0 AND COALESCE(s.status,'accepted')='accepted' THEN s.duration END),0) AS sample_seconds
                 FROM people p LEFT JOIN voice_samples s ON s.person_id=p.id
                 LEFT JOIN speaker_turns t ON t.id=s.turn_id
                 GROUP BY p.id,p.name ORDER BY p.name COLLATE NOCASE,p.id""").fetchall()
         people = []
         for row in rows:
             item = dict(row)
-            reasons = []
-            if item["sample_count"] < 3:
-                reasons.append("need_3_samples")
-            if item["clip_count"] < 2:
-                reasons.append("need_2_clips")
-            if item["sample_seconds"] < 20:
-                reasons.append("need_20s")
-            item["enrollment_ready"] = not reasons
-            item["enrollment_reasons"] = reasons
+            item["enrollment_reasons"] = voice_id.enrollment_reasons(
+                int(item["sample_count"]), int(item["clip_count"]), float(item["sample_seconds"]), calibrated)
+            item["enrollment_ready"] = not item["enrollment_reasons"]
             people.append(item)
         return people
 
@@ -776,57 +764,33 @@ class Inbox:
         return {"id": person_id, "name": name} if result.rowcount else None
 
     def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
+        del use_sample
         with self.connect() as db:
             person = db.execute("SELECT id FROM people WHERE id=?", (person_id,)).fetchone()
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
             if not person or not turn:
                 return False
-            # Identity belongs to this contiguous same-speaker run, never a later
-            # recurrence of the same diarization key (A -> B -> A).
             peers = db.execute("""SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started, ended, id""",
                                (turn["chunk_id"],)).fetchall()
             matching = next((group for group in review_groups(peers)
-                             if any(candidate["id"] == turn_id for candidate in group)), [turn])
-            placeholders = ",".join("?" for _ in matching)
-            db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
-                WHERE id IN ({placeholders})""", (person_id, *[candidate["id"] for candidate in matching]))
+                             if any(candidate["id"] == turn_id for candidate in group)), None)
+            if not matching:
+                matching = [turn]
             turn_ids = [candidate["id"] for candidate in matching]
             placeholders = ",".join("?" for _ in turn_ids)
+            db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
+                WHERE id IN ({placeholders})""", (person_id, *turn_ids))
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
-            if use_sample:
-                vectors = [json.loads(candidate["embedding_json"] or "null") for candidate in matching]
-                vectors = [vector for vector in vectors if isinstance(vector, list) and vector]
-                duration = sum(max(0.0, float(candidate["ended"]) - float(candidate["started"]))
-                               for candidate in matching)
-                if vectors and duration >= 3:
-                    if any(len(vector) != 128 or not all(math.isfinite(float(value)) for value in vector)
-                           for vector in vectors):
-                        return True
-                    centroid = [sum(float(vector[index]) for vector in vectors) / len(vectors)
-                                for index in range(128)]
-                    norm = math.sqrt(sum(value ** 2 for value in centroid))
-                    if norm:
-                        centroid = [value / norm for value in centroid]
-                    db.execute("""INSERT INTO voice_samples
-                        (id,person_id,turn_id,embedding_json,duration,confirmed_at)
-                        VALUES(?,?,?,?,?,?)""",
-                        (str(uuid.uuid4()), person_id, matching[0]["id"],
-                         json.dumps(centroid), duration, time.time()))
+            voice_id.clear_enrollment(db, turn_ids)
+            enrolled = voice_id.enroll_turns(db, matching, person_id)
+            voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
+            if enrolled.get("enrolled"):
+                voice_id.enqueue_unlabeled(db, "sample")
         return True
 
 
 def cosine(left, right):
-    if len(left or []) != 128 or len(right or []) != 128:
-        return -1.0
-    try:
-        if not all(math.isfinite(float(value)) for value in list(left) + list(right)):
-            return -1.0
-        dot = sum(float(left[i]) * float(right[i]) for i in range(128))
-        a = math.sqrt(sum(float(left[i]) ** 2 for i in range(128)))
-        b = math.sqrt(sum(float(right[i]) ** 2 for i in range(128)))
-    except (TypeError, ValueError, OverflowError):
-        return -1.0
-    return dot / (a * b) if a and b else -1.0
+    return voice_id.cosine(left, right)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -1011,8 +975,10 @@ def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpe
             stop.wait(2)
             continue
         try:
+            diarization_mod.refresh_decoded_pins(inbox)
             text, provenance = transcribe(row, model, work, whisper, ffmpeg, mlx_command, mlx_model, config)
             inbox.complete(row["id"], text, provenance)
+            diarization_mod.refresh_decoded_pins(inbox)
         except Exception as error:
             # Keep the audio and retry. Error type only; external-tool output is private.
             attempts = row["attempts"] + 1
@@ -1090,6 +1056,7 @@ def main():
                          args=(inbox, stop, args.model, args.whisper, args.ffmpeg,
                                args.mlx_command, args.mlx_model, config), daemon=True).start()
     if args.ffmpeg and args.diarization_cli.is_file():
+        voice_id.queue_reextract(inbox)
         threading.Thread(target=diarization_mod.worker,
                          args=(inbox, stop, args.diarization_cli, args.ffmpeg), daemon=True).start()
     if args.ffmpeg and not args.no_vad and args.vad_cli.is_file():
@@ -1108,6 +1075,10 @@ def main():
             )
         except Exception as error:
             parser.error(str(error))
+    decoded_audio.sweep_abandoned(inbox.root / "processing")
+    diarization_mod.refresh_decoded_pins(inbox)
+    identity_thread = threading.Thread(target=voice_id.voice_worker, args=(inbox, stop), daemon=True)
+    identity_thread.start()
     viewer_mod.start_viewer(inbox, remote=remote)
     print(f"Receiver listening on {args.host}:{args.port}; local transcripts: {inbox.root / 'life.md'}", flush=True)
     try:
@@ -1116,6 +1087,7 @@ def main():
         pass
     finally:
         stop.set()
+        identity_thread.join(timeout=5)
         if inbox.viewer_server:
             inbox.viewer_server.shutdown()
             inbox.viewer_server.server_close()

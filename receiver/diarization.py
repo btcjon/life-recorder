@@ -9,6 +9,8 @@ import uuid
 from pathlib import Path
 
 from meetings import SESSION_GAP, chunk_span, parse_utc
+import decoded_audio
+import voice_id
 
 LOW_COVERAGE = 0.20
 MAX_CONTEXT_SECONDS = 180.0
@@ -18,24 +20,6 @@ OFFSET_THRESHOLD = 0.30
 MIN_SEGMENT_DURATION = 0.30
 MIN_GAP_DURATION = 0.80
 CLUSTER_THRESHOLD = 0.45
-
-
-def _normalized_mean(vectors):
-    normalized = []
-    for vector in vectors:
-        try:
-            if len(vector) != 128 or not all(math.isfinite(float(value)) for value in vector):
-                continue
-            norm = sum(float(value) ** 2 for value in vector) ** 0.5
-            if norm:
-                normalized.append([float(value) / norm for value in vector])
-        except (TypeError, ValueError, OverflowError):
-            continue
-    if not normalized:
-        return None
-    mean = [sum(vector[index] for vector in normalized) / len(normalized) for index in range(128)]
-    norm = sum(value ** 2 for value in mean) ** 0.5
-    return [value / norm for value in mean] if norm else None
 
 
 def _overlap(start: float, end: float) -> float:
@@ -146,6 +130,7 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
     result = work / f"{row['id']}-{token}-diar.json"
     embeddings = work / f"{row['id']}-{token}-embeddings.json"
     parts = []
+    leases = []
     started = time.monotonic()
     neighbors = list(neighbors or [row])
     offset = 0.0
@@ -156,11 +141,11 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
         asr_words = 0
     try:
         for neighbor in neighbors:
-            part = work / f"{neighbor['id']}-{token}-part.wav"
-            subprocess.run([ffmpeg, "-nostdin", "-loglevel", "error", "-y", "-i", neighbor["path"],
-                            "-ar", "16000", "-ac", "1", str(part)], check=True,
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
-            parts.append(part)
+            lease = decoded_audio.acquire(
+                ffmpeg, Path(neighbor["path"]), str(neighbor["id"]), work, run=subprocess.run,
+            )
+            leases.append(lease)
+            parts.append(lease.path)
         offset = 0.0
         for neighbor in neighbors:
             if neighbor["id"] == row["id"]:
@@ -187,30 +172,10 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
             exported = json.loads(embeddings.read_text()) if embeddings.is_file() else []
             if not isinstance(exported, list):
                 raise ValueError("Malformed embedding export")
-        by_speaker = {}
-        context_embedding_count = 0
-        context_clusters = set()
-        current_embedding_count = 0
-        current_clusters = set()
-        window_start, window_end = offset, offset + duration
-        for item in exported:
-            cluster = item.get("cluster")
-            vector = item.get("rho128")
-            if isinstance(cluster, int):
-                context_clusters.add(cluster)
-            if isinstance(cluster, int) and isinstance(vector, list):
-                by_speaker.setdefault(f"S{cluster + 1}", []).append(vector)
-                context_embedding_count += 1
-                start = _finite(item.get("startTime"))
-                end = _finite(item.get("endTime"))
-                if start is None or end is None:
-                    in_current = True
-                else:
-                    in_current = _overlap(max(start, window_start), min(end, window_end)) > 0
-                if in_current:
-                    current_embedding_count += 1
-                    current_clusters.add(cluster)
-        centroids = {speaker: _normalized_mean(vectors) for speaker, vectors in by_speaker.items()}
+        parsed, embedding_stats = voice_id.parse_embedding_export(exported, offset, duration)
+        context_embedding_count = embedding_stats["context_embedding_count"]
+        current_embedding_count = embedding_stats["current_embedding_count"]
+        current_clusters = set(embedding_stats["current_clusters"])
         turns = []
         for item in payload.get("segments") or []:
             start = _finite(item.get("startTimeSeconds"))
@@ -224,13 +189,13 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
             if clipped_end - clipped_start < 0.05:
                 continue
             speaker_key = str(item.get("speakerId") or "Unknown")
-            embedding = centroids.get(speaker_key)
             if clipped_start < 0 or clipped_end <= clipped_start or clipped_end > duration + 2:
                 raise ValueError("Invalid diarization timing")
             turns.append({"speaker_key": speaker_key,
                           "started": clipped_start, "ended": clipped_end,
                           "quality": float(item.get("qualityScore") or 0),
-                          "embedding": embedding if isinstance(embedding, list) else None})
+                          "embedding": None, "vectors": []})
+        voice_id.bind_turn_vectors(parsed, turns)
         speech = _speech_seconds(turns)
         coverage = speech / duration if duration else 0.0
         outcome = classify_outcome(turns, duration, asr_words=asr_words, no_speech=no_speech)
@@ -248,7 +213,7 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
             "embedding_count": current_embedding_count,
             "cluster_count": len(current_clusters) if turns else 0,
             "context_embedding_count": context_embedding_count,
-            "context_cluster_count": len(context_clusters),
+            "context_cluster_count": embedding_stats["context_cluster_count"],
             "context_clips": len(neighbors),
             "context_offset": round(offset, 3),
             "asr_words": asr_words,
@@ -257,8 +222,8 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path, neighbors=None) -> di
         wav.unlink(missing_ok=True)
         result.unlink(missing_ok=True)
         embeddings.unlink(missing_ok=True)
-        for part in parts:
-            part.unlink(missing_ok=True)
+        for lease in leases:
+            lease.release()
 
 
 def _attach_sample(db, sample, turn_id: str) -> None:
@@ -267,11 +232,17 @@ def _attach_sample(db, sample, turn_id: str) -> None:
     existing = db.execute("SELECT id FROM voice_samples WHERE turn_id=?", (turn_id,)).fetchone()
     if existing:
         return
+    vector_id = sample["vector_id"] if "vector_id" in sample.keys() else None
+    if vector_id and not db.execute("SELECT 1 FROM voice_vectors WHERE id=?", (vector_id,)).fetchone():
+        vector_id = None
+    status = sample["status"] if "status" in sample.keys() and sample["status"] else "accepted"
+    legacy = int(sample["legacy"]) if "legacy" in sample.keys() and sample["legacy"] is not None else 0
+    source_key = sample["source_key"] if "source_key" in sample.keys() else None
     db.execute("""INSERT INTO voice_samples
-        (id,person_id,turn_id,embedding_json,duration,confirmed_at)
-        VALUES (?,?,?,?,?,?)""",
+        (id,person_id,turn_id,embedding_json,duration,confirmed_at,vector_id,status,legacy,source_key)
+        VALUES (?,?,?,?,?,?,?,?,?,?)""",
         (str(uuid.uuid4()), sample["person_id"], turn_id, sample["embedding_json"],
-         sample["duration"], sample["confirmed_at"]))
+         sample["duration"], sample["confirmed_at"], vector_id, status, legacy, source_key))
 
 
 def _restore_labels(db, chunk_id: str, previous_turns, previous_samples) -> None:
@@ -349,12 +320,14 @@ def save_result(inbox, chunk_id: str, result: dict) -> None:
         previous_turns = list(db.execute("SELECT * FROM speaker_turns WHERE chunk_id=?", (chunk_id,)))
         previous_ids = [row["id"] for row in previous_turns]
         previous_samples = {}
+        inherited = voice_id.track_spans(db, chunk_id)
         if previous_ids:
             placeholders = ",".join("?" for _ in previous_ids)
             for sample in db.execute(f"SELECT * FROM voice_samples WHERE turn_id IN ({placeholders})",
                                      previous_ids):
-                previous_samples[sample["turn_id"]] = dict(sample)
+                previous_samples[sample["turn_id"]] = sample
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", previous_ids)
+        voice_id.retire_chunk(db, chunk_id)
         db.execute("DELETE FROM speaker_turns WHERE chunk_id=?", (chunk_id,))
         db.execute("""INSERT INTO speaker_runs
             (id,chunk_id,engine,status,speaker_count,processing_seconds,created_at,
@@ -365,14 +338,19 @@ def save_result(inbox, chunk_id: str, result: dict) -> None:
              result["coverage"], result["turn_count"], result["embedding_count"],
              result["cluster_count"], json.dumps(diagnostics)))
         for turn in result["turns"]:
+            turn_id = str(uuid.uuid4())
             db.execute("""INSERT INTO speaker_turns
                 (id,run_id,chunk_id,speaker_key,started,ended,quality,embedding_json)
                 VALUES (?,?,?,?,?,?,?,?)""",
-                (str(uuid.uuid4()), run_id, chunk_id, turn["speaker_key"], turn["started"],
-                 turn["ended"], turn["quality"], json.dumps(turn["embedding"])))
+                (turn_id, run_id, chunk_id, turn["speaker_key"], turn["started"],
+                 turn["ended"], turn["quality"], json.dumps(turn.get("embedding"))))
+            voice_id.store_turn_vectors(db, turn_id, run_id, chunk_id, turn, now)
         _restore_labels(db, chunk_id, previous_turns, previous_samples)
-        db.execute("""UPDATE chunks SET diarization_status=?,diarization_error=NULL WHERE id=?""",
-                   (result["outcome"], chunk_id))
+        voice_id.assign_chunk_run(db, run_id, chunk_id, inherited, now)
+        db.execute("""UPDATE chunks SET diarization_status=?,diarization_error=NULL,
+            voice_extract_version=? WHERE id=?""",
+                   (result["outcome"], voice_id.EXTRACTION_VERSION, chunk_id))
+        voice_id.enqueue_chunk(db, chunk_id, "result")
 
 
 def neighbor_rows(inbox, row) -> list:
@@ -401,8 +379,10 @@ def worker(inbox, stop, cli: Path, ffmpeg: str) -> None:
         if not row:
             stop.wait(3); continue
         try:
+            refresh_decoded_pins(inbox)
             neighbors = neighbor_rows(inbox, row)
             save_result(inbox, row["id"], process_chunk(row, cli, ffmpeg, work, neighbors=neighbors))
+            refresh_decoded_pins(inbox)
         except Exception as error:
             attempts = int(row["diarization_attempts"] or 0) + 1
             with inbox.connect() as db:
@@ -410,3 +390,26 @@ def worker(inbox, stop, cli: Path, ffmpeg: str) -> None:
                     diarization_error=? WHERE id=?""",
                     (attempts, time.time() + min(3600, 30 * 2 ** min(attempts, 7)),
                      type(error).__name__, row["id"]))
+
+
+def refresh_decoded_pins(inbox) -> None:
+    """Keep the shared wav while this clip, or a neighbor that still needs it, is in the pipeline."""
+    work = inbox.root / "processing"
+    with inbox.connect() as db:
+        rows = list(db.execute("SELECT * FROM chunks WHERE audio_state='present'"))
+    keep = []
+    pending = []
+    for row in rows:
+        path = Path(row["path"])
+        if not path.is_file():
+            continue
+        if row["status"] == "pending" or row["vad_status"] == "pending" or row["diarization_status"] == "pending":
+            keep.append((row["id"], path))
+        if row["status"] == "complete" and row["diarization_status"] == "pending":
+            pending.append(row)
+    for row in pending:
+        for neighbor in neighbor_rows(inbox, row):
+            path = Path(neighbor["path"])
+            if path.is_file():
+                keep.append((neighbor["id"], path))
+    decoded_audio.sync_pins(work, keep)

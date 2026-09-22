@@ -42,6 +42,7 @@ def main():
     desktop_shot = sys.argv[3]
     mobile_shot = sys.argv[4]
     aba_selector = sys.argv[5] if len(sys.argv) > 5 else ""
+    named_selector = sys.argv[6] if len(sys.argv) > 6 else ""
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
         page = browser.new_page(viewport={"width": 1280, "height": 800})
@@ -51,6 +52,21 @@ def main():
         page.wait_for_selector(".row", timeout=10000)
         page.wait_for_function("() => document.getElementById('status').textContent !== 'Loading'", timeout=10000)
         page.locator(selector).click()
+        page.get_by_role("button", name="Transcript").click()
+        page.wait_for_selector("#pane .speakers .pill", timeout=5000)
+        transcript_pills = page.evaluate(
+            """() => [...document.querySelectorAll('#pane .speakers .pill')].map((pill) => pill.textContent)"""
+        )
+        page.locator("#pane .speakers .pill").first.click()
+        page.wait_for_function(
+            """() => {
+              const audio = document.getElementById("player");
+              return audio && !audio.paused && audio.currentTime >= 3.9 && audio.currentTime < 20;
+            }""",
+            timeout=8000,
+        )
+        piece_time = page.evaluate("() => document.getElementById('player').currentTime")
+        page.evaluate("() => document.getElementById('player').pause()")
         page.get_by_role("button", name="Speaker turns").click()
         page.wait_for_selector("#pane .group .play-toggle", timeout=5000)
         desktop_cards = card_metrics(page)
@@ -85,6 +101,31 @@ def main():
             page.get_by_role("button", name="Speaker turns").click()
             page.wait_for_selector("#pane .group .play-toggle", timeout=5000)
             aba_cards = card_metrics(page)
+        named_pills = []
+        if named_selector:
+            page.locator(named_selector).click()
+            page.get_by_role("button", name="Transcript").click()
+            page.wait_for_selector("#pane .speakers .pill", timeout=5000)
+            named_pills = page.evaluate(
+                """() => [...document.querySelectorAll('#pane .speakers .pill')].map((pill) => pill.textContent)"""
+            )
+            page.locator("#pane .speakers .pill").first.click()
+            page.wait_for_selector(".popover .person-option", timeout=5000)
+            with page.expect_response(lambda response: response.request.method == "POST" and "/label" in response.url, timeout=8000) as labeled:
+                with page.expect_response(lambda response: response.request.method == "GET" and "/v1/days/" in response.url, timeout=8000):
+                    page.locator(".popover .person-option", has_text="John Phelan").click()
+            label_posts = 1 if labeled.value.ok else 0
+            page.wait_for_function(
+                """() => {
+                  const status = document.getElementById('status');
+                  const pill = document.querySelector('#pane .speakers .pill');
+                  return status && status.textContent !== 'Loading'
+                    && pill && pill.textContent.includes('✓');
+                }""",
+                timeout=8000,
+            )
+        else:
+            label_posts = 0
         page.set_viewport_size({"width": 390, "height": 844})
         page.wait_for_timeout(200)
         page.locator(selector).click()
@@ -94,12 +135,16 @@ def main():
         page.locator("#pane .group").first.screenshot(path=mobile_shot)
         print(json.dumps({
             "pageErrors": errors,
+            "transcriptPills": transcript_pills,
+            "pieceTime": piece_time,
             "desktopCards": desktop_cards,
             "afterFirstPlay": after_first,
             "afterSecondPlay": after_second,
             "afterFull": after_full,
             "abaCards": aba_cards,
             "mobileCards": mobile_cards,
+            "namedPills": named_pills,
+            "labelPosts": label_posts,
         }))
         browser.close()
 

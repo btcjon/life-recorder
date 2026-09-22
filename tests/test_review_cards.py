@@ -80,7 +80,7 @@ def add_chunk(inbox: Inbox, started: str, duration: float, words, turns, transcr
 
 
 def vec(index: int):
-    values = [0.0] * 128
+    values = [0.0] * 256
     values[index] = 1.0
     return values
 
@@ -116,6 +116,36 @@ class ReviewCardTests(unittest.TestCase):
                 ],
                 "second speaker keeps talking first speaker closes",
             )
+            named_id = add_chunk(
+                inbox,
+                "2026-09-10T16:04:00.000Z",
+                20.0,
+                [
+                    {"word": "duty", "startTime": 4.5, "endTime": 5.0},
+                    {"word": "trash", "startTime": 13.8, "endTime": 14.1},
+                ],
+                [
+                    {"speaker_key": "S1", "started": 4.3, "ended": 6.5, "quality": 1.0, "embedding": vec(0)},
+                    {"speaker_key": "S1", "started": 10.6, "ended": 11.0, "quality": 1.0, "embedding": vec(0)},
+                    {"speaker_key": "S1", "started": 13.7, "ended": 14.2, "quality": 1.0, "embedding": vec(0)},
+                ],
+                "duty trash",
+            )
+            person = inbox.create_person("John Phelan")
+            with inbox.connect() as db:
+                rows = db.execute(
+                    "SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started",
+                    (named_id,),
+                ).fetchall()
+                db.execute(
+                    "UPDATE speaker_turns SET person_id=?, label_source='confirmed' WHERE id IN (?,?)",
+                    (person["id"], rows[0][0], rows[1][0]),
+                )
+                still_open = db.execute(
+                    "SELECT person_id FROM speaker_turns WHERE id=?",
+                    (rows[2][0],),
+                ).fetchone()[0]
+            self.assertIsNone(still_open)
             aba_id = add_chunk(
                 inbox,
                 "2026-09-10T16:02:00.000Z",
@@ -140,7 +170,8 @@ class ReviewCardTests(unittest.TestCase):
                 url = "http://127.0.0.1:%s/#%s" % (port, token)
                 result = subprocess.run(
                     [python, str(PROBE), url, "#recording-" + fixture_id,
-                     str(desktop_shot), str(mobile_shot), "#recording-" + aba_id],
+                     str(desktop_shot), str(mobile_shot), "#recording-" + aba_id,
+                     "#recording-" + named_id],
                     capture_output=True,
                     text=True,
                     timeout=90,
@@ -151,19 +182,26 @@ class ReviewCardTests(unittest.TestCase):
                 metrics = json.loads(result.stdout.strip().splitlines()[-1])
                 self.assertEqual(metrics["pageErrors"], [])
                 desktop = metrics["desktopCards"]
+                expected = [
+                    ("S2", 4.0, 39.6, ("second", "talking")),
+                    ("S1", 42.7, 60.0, ("first", "closes")),
+                ]
                 self.assertEqual(len(desktop), 2)
-                self.assertAlmostEqual(float(desktop[0]["start"]), 4.0)
-                self.assertAlmostEqual(float(desktop[0]["end"]), 39.6)
-                self.assertAlmostEqual(float(desktop[1]["start"]), 42.7)
-                self.assertAlmostEqual(float(desktop[1]["end"]), 60.0)
-                self.assertIn("Unknown · S2 · 4.0–39.6s", desktop[0]["pill"])
-                self.assertIn("Unknown · S1 · 42.7–60.0s", desktop[1]["pill"])
-                for card in desktop:
+                self.assertEqual(metrics["transcriptPills"], [card["pill"] for card in desktop])
+                self.assertGreaterEqual(metrics["pieceTime"], 3.9)
+                self.assertLess(metrics["pieceTime"], 20.0)
+                for card, (key, start, end, words) in zip(desktop, expected):
+                    self.assertAlmostEqual(float(card["start"]), start)
+                    self.assertAlmostEqual(float(card["end"]), end)
+                    self.assertAlmostEqual(card["progressMax"], end - start, places=2)
+                    self.assertIn("Unknown · %s · %s–%ss" % (key, start, end), card["pill"])
+                    for word in words:
+                        self.assertIn(word, card["text"])
                     self.assertEqual(card["play"], "Play")
                     self.assertEqual(card["replay"], "Replay")
                     self.assertTrue(card["hasPicker"])
                     self.assertRegex(card["clock"], r"0:00 / 0:\d\d")
-                    self.assertIn("speaker", card["text"])
+                self.assertLess(float(desktop[0]["end"]), float(desktop[1]["start"]))
                 self.assertTrue(metrics["afterFirstPlay"][0]["active"])
                 self.assertEqual(metrics["afterFirstPlay"][0]["play"], "Pause")
                 self.assertFalse(metrics["afterSecondPlay"][0]["active"])
@@ -179,6 +217,13 @@ class ReviewCardTests(unittest.TestCase):
                 self.assertAlmostEqual(float(aba[2]["start"]), 8.0)
                 mobile = metrics["mobileCards"]
                 self.assertEqual(len(mobile), 2)
+                named = metrics["namedPills"]
+                self.assertEqual(len(named), 1)
+                self.assertIn("John Phelan", named[0])
+                self.assertNotIn("✓", named[0])
+                self.assertIn("4.3–14.2s", named[0])
+                self.assertNotIn("Unknown", named[0])
+                self.assertEqual(metrics["labelPosts"], 1)
                 self.assertGreaterEqual(mobile[0]["playHeight"], 44)
                 self.assertGreaterEqual(mobile[0]["replayHeight"], 44)
                 self.assertTrue(desktop_shot.is_file())

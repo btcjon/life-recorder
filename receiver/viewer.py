@@ -70,7 +70,7 @@ APP = """<!doctype html>
 </header>
 <main>
   <div id="library">
-    <aside id="list" aria-label="Recordings"></aside>
+    <aside id="list" aria-label="Recordings"><p class="meta">Loading recordings…</p></aside>
     <section id="pane" tabindex="-1" aria-live="polite"></section>
   </div>
   <section id="people-view" hidden>
@@ -137,6 +137,7 @@ aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 14px
 .speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; position: relative; }
 .pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
 .pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(36,95,204,.25); }
+.pill.active { box-shadow: 0 0 0 2px rgba(36,95,204,.55); }
 .pill[aria-disabled="true"] { cursor: default; opacity: .85; }
 .group { position: relative; padding: 14px; }
 .group.active { border-color: #9fbbef; box-shadow: 0 0 0 1px rgba(36,95,204,.12); }
@@ -271,6 +272,9 @@ JS = r"""
   let createdPersonKey = null;
   let createdPersonName = null;
   let identitySample = false;
+  let identitySaving = false;
+  let reviewTimer = null;
+  let identityPointerInside = false;
   let identityNewName = "";
   let mobileDetailOpen = false;
   let listScroll = 0;
@@ -287,12 +291,18 @@ JS = r"""
     return ({
       no_embedding: "No voice sample is attached yet",
       no_enrolled_voiceprints: "No enrolled voices yet",
+      no_clean_vector: "This clip has no clean voice sample",
+      legacy_centroid: "This voice sample is from an older recording and is not used",
+      track_frozen: "This voice track has two names and needs a split",
+      track_anchor: "Suggested from this recording",
+      needs_confirmation: "Suggested match, not applied",
       "score_below_0.60": "Not a close enough match",
-      "score_below_0.85": "Not a close enough match",
+      "score_below_0.85": "Close, but not sure enough to name it",
       "margin_below_0.10": "Too similar to another person",
-      need_3_samples: "Needs 3 voice samples",
+      need_2_samples: "Needs 2 voice samples",
       need_2_clips: "Needs samples from 2 recordings",
-      need_20s: "Needs 20 seconds of confirmed voice",
+      need_10s: "Needs 10 seconds of confirmed voice",
+      need_5s: "Needs 5 seconds of one clean voice",
       confirmed: "Confirmed",
       matched: "Suggested match"
     })[code] || "Needs a closer look";
@@ -306,7 +316,8 @@ JS = r"""
     return (payload.chunks || []).filter((chunk) => {
       const text = chunk.transcript || "";
       const turns = chunk.speakers || [];
-      if (!showAll.checked && !text.trim() && turns.length === 0) return false;
+      const turnCount = Number(chunk.speaker_turn_count || 0) || turns.length;
+      if (!showAll.checked && !text.trim() && turnCount === 0) return false;
       return !query || text.toLowerCase().includes(query) || (chunk.started_local || "").toLowerCase().includes(query);
     });
   }
@@ -317,12 +328,86 @@ JS = r"""
     const last = (data.days && data.days.length) ? data.days[data.days.length - 1] : new Date().toISOString().slice(0, 10);
     if (!day.value) day.value = last;
   }
+  function listMessage(text) {
+    list.replaceChildren();
+    const note = document.createElement("p");
+    note.className = "meta";
+    note.textContent = text;
+    list.appendChild(note);
+  }
+  function scheduleReview(chunkId) {
+    clearTimeout(reviewTimer);
+    reviewTimer = setTimeout(() => {
+      reviewTimer = null;
+      if (selectedKind === "chunk" && selectedId === chunkId) loadReview(chunkId);
+    }, 2000);
+  }
+  function ensureReview(chunk) {
+    if (!chunk || chunk.reviewState === "loading") return;
+    if (Array.isArray(chunk.speakers)) {
+      if (chunk.voice_pending && !reviewTimer) scheduleReview(chunk.id);
+      return;
+    }
+    chunk.reviewState = "loading";
+    loadReview(chunk.id);
+  }
+  async function loadReview(chunkId) {
+    let response;
+    try {
+      response = await fetch("/v1/chunks/" + chunkId + "/review", { headers: authHeaders(), cache: "no-store" });
+    } catch (error) {
+      response = null;
+    }
+    if (!payload) return;
+    const chunk = (payload.chunks || []).find((item) => item.id === chunkId);
+    if (!response || !response.ok) {
+      if (chunk) {
+        chunk.reviewTries = (chunk.reviewTries || 0) + 1;
+        chunk.reviewState = "";
+      }
+      if (chunk && chunk.reviewTries < 3 && selectedKind === "chunk" && selectedId === chunkId) scheduleReview(chunkId);
+      return;
+    }
+    const detail = await response.json();
+    if (!payload || selectedKind !== "chunk" || selectedId !== chunkId) return;
+    const current = (payload.chunks || []).find((item) => item.id === chunkId);
+    if (!current) return;
+    const stamp = JSON.stringify(detail.speakers || []);
+    const pending = !!detail.voice_pending;
+    const changed = current.speakerStamp !== stamp || !Array.isArray(current.speakers);
+    current.speakers = detail.speakers || [];
+    current.speakerStamp = stamp;
+    current.reviewState = "ready";
+    current.reviewTries = 0;
+    current.voice_pending = pending;
+    if (detail.diarization) current.diarization = detail.diarization;
+    if (detail.diarization_status) current.diarization_status = detail.diarization_status;
+    if (detail.transcript) current.transcript = detail.transcript;
+    if (detail.people) payload.people = detail.people;
+    if (pending) scheduleReview(chunkId);
+    if (changed && !openIdentityKey && !identitySaving) render();
+  }
   async function loadDay() {
     const requestId = ++dayRequest;
+    clearTimeout(reviewTimer);
+    reviewTimer = null;
     status.textContent = "Loading";
-    const response = await fetch("/v1/days/" + day.value, { headers: authHeaders(), cache: "no-store" });
+    if (!payload) listMessage("Loading recordings…");
+    let response;
+    try {
+      response = await fetch("/v1/days/" + day.value, { headers: authHeaders(), cache: "no-store" });
+    } catch (error) {
+      if (requestId !== dayRequest) return;
+      status.textContent = "Unavailable";
+      if (!payload) listMessage("Couldn't load this day. Refresh to try again.");
+      return;
+    }
     if (requestId !== dayRequest) return;
-    if (!response.ok) { status.textContent = "Unavailable"; return; }
+    if (!response.ok) {
+      status.textContent = "Unavailable";
+      if (!payload) listMessage("Couldn't load this day. Refresh to try again.");
+      return;
+    }
     const nextPayload = await response.json();
     if (requestId !== dayRequest) return;
     payload = nextPayload;
@@ -361,21 +446,21 @@ JS = r"""
     const turns = group.turns || [];
     const key = group.speaker_key || (turns[0] && turns[0].speaker_key) || "S1";
     if (!turns.length) return { label: "Unknown · No speaker turns available", cls: "unknown", interactive: false };
-    const names = new Set();
-    const classes = new Set();
-    for (const turn of turns) {
-      const state = identityState(turn);
-      classes.add(state.cls);
-      if (turn.person_id) names.add(turn.person_id);
-      else if (turn.suggested_person_id) names.add("suggested:" + turn.suggested_person_id);
-      else names.add(state.cls);
-    }
-    if (classes.size > 1 || names.size > 1) return { label: "Mixed labels", cls: "unknown", interactive: true };
-    const turn = turns[0];
+    const confirmedIds = new Set(turns.filter((turn) => turn.person_id).map((turn) => turn.person_id));
+    if (confirmedIds.size > 1) return { label: "Mixed labels", cls: "unknown", interactive: true };
     const named = turns.find((item) => item.name);
-    if (turn.preserved) return { label: named ? named.name + " · Earlier label" : "Earlier label", cls: "preserved", interactive: true };
-    if (turn.person_id && named) return { label: named.name + " ✓", cls: "confirmed", interactive: true };
-    if (turn.suggested_name) return { label: "Possibly " + turn.suggested_name, cls: "suggested", interactive: true };
+    if (confirmedIds.size === 1 && named) {
+      const complete = turns.every((turn) => turn.person_id === named.person_id);
+      if (turns.every((turn) => turn.preserved)) return { label: named.name + " · Earlier label", cls: "preserved", interactive: true };
+      if (complete && turns.every((turn) => turn.label_source === "automatic")) return { label: named.name + " · Auto", cls: "confirmed", interactive: true };
+      if (complete) return { label: named.name + " ✓", cls: "confirmed", interactive: true };
+      return { label: named.name, cls: "confirmed", interactive: true };
+    }
+    if (turns.every((turn) => turn.preserved)) return { label: "Earlier label", cls: "preserved", interactive: true };
+    const suggested = turns.find((turn) => turn.suggested_name);
+    if (suggested && turns.every((turn) => !turn.suggested_name || turn.suggested_name === suggested.suggested_name)) {
+      return { label: "Possibly " + suggested.suggested_name, cls: "suggested", interactive: true };
+    }
     return { label: "Unknown · " + key, cls: "unknown", interactive: true };
   }
   function enrollmentCopy(person) {
@@ -383,8 +468,8 @@ JS = r"""
     const seconds = Number(person.sample_seconds || 0).toFixed(1);
     const clips = Number(person.clip_count || 0);
     const stats = person.name + "'s " + samples + " samples/" + seconds + "s/" + clips + " clips";
-    if (person.enrollment_ready) return "Ready for automatic suggestions · " + stats;
-    const remaining = Math.max(0, 3 - samples);
+    if (person.enrollment_ready) return "Ready to auto-tag matches · " + stats;
+    const remaining = Math.max(0, 2 - samples);
     if (remaining === 1) return "One more confirmed voice sample needed for " + stats;
     if (remaining > 1) return remaining + " more confirmed voice samples needed for " + stats;
     return ((person.enrollment_reasons || []).map(reasonText).join(". ") || "Still learning this voice") + " · " + stats;
@@ -408,6 +493,18 @@ JS = r"""
   function groupTranscript(group) {
     return (group.turns || []).map((turn) => (turn.text || "").trim()).filter(Boolean).join(" ");
   }
+  function gapHasOtherSpeaker(turns, left, right) {
+    const gapStart = Number(left.ended);
+    const gapEnd = Number(right.started);
+    if (!Number.isFinite(gapStart) || !Number.isFinite(gapEnd) || gapEnd <= gapStart) return false;
+    return turns.some((turn) => {
+      if (turn.id === left.id || turn.id === right.id) return false;
+      if ((turn.run_id || "") === (left.run_id || "") && (turn.speaker_key || "Unknown") === (left.speaker_key || "Unknown")) return false;
+      const start = Number(turn.started);
+      const end = Number(turn.ended);
+      return Number.isFinite(start) && Number.isFinite(end) && start < gapEnd && end > gapStart;
+    });
+  }
   function canMergeTurns(currentTurns, next, all) {
     const previous = currentTurns && currentTurns[currentTurns.length - 1];
     if (!previous || !next) return false;
@@ -418,17 +515,7 @@ JS = r"""
       if (turn.person_id) people.add(turn.person_id);
     }
     if (people.size > 1) return false;
-    const gapStart = Number(previous.ended);
-    const gapEnd = Number(next.started);
-    if (!Number.isFinite(gapStart) || !Number.isFinite(gapEnd) || gapEnd <= gapStart) return true;
-    const skip = new Set((currentTurns.concat([next])).map((turn) => turn.id));
-    return !(all || []).some((turn) => {
-      if (skip.has(turn.id)) return false;
-      if ((turn.run_id || "") === (previous.run_id || "") && (turn.speaker_key || "Unknown") === (previous.speaker_key || "Unknown")) return false;
-      const start = Number(turn.started);
-      const end = Number(turn.ended);
-      return Number.isFinite(start) && Number.isFinite(end) && start < gapEnd && end > gapStart;
-    });
+    return !gapHasOtherSpeaker(all, previous, next);
   }
   function groupTurns(chunk) {
     const turns = (chunk.speakers || []).slice().sort((left, right) => {
@@ -443,7 +530,7 @@ JS = r"""
       const last = groups[groups.length - 1];
       if (last && canMergeTurns(last.turns, turn, turns)) {
         last.turns.push(turn);
-        last.preserved = last.preserved || !!turn.preserved;
+        last.preserved = last.preserved && !!turn.preserved;
         continue;
       }
       groups.push({
@@ -482,6 +569,10 @@ JS = r"""
         meter.value = elapsed;
       }
       if (clock) clock.textContent = formatTime(elapsed) + " / " + formatTime(duration);
+    });
+    document.querySelectorAll(".pill[data-identity-key]").forEach((pill) => {
+      const playing = activeGroupKey === pill.getAttribute("data-identity-key") && clipStartTime != null && !player.paused;
+      pill.classList.toggle("active", playing);
     });
   }
   player.addEventListener("timeupdate", () => {
@@ -668,11 +759,9 @@ JS = r"""
     const named = (group.turns || []).find((turn) => turn.person_id);
     return named ? named.person_id : "";
   }
-  function actionLabel(group, personId) {
-    if (!personId) return "Assign";
-    if ((group.turns || []).some((turn) => turn.person_id === personId)) return "Change";
-    if ((group.turns || []).some((turn) => turn.suggested_person_id === personId || turn.suggested_name)) return "Confirm";
-    return "Assign";
+  function fullyNamed(group, personId) {
+    const turns = group.turns || [];
+    return !!personId && turns.length > 0 && turns.every((turn) => turn.person_id === personId);
   }
   function closePopover(restoreFocus) {
     const key = openIdentityKey;
@@ -694,28 +783,39 @@ JS = r"""
   function applyIdentity(group, personId, useSample) {
     const turn = group.turns[0];
     if (!turn) return Promise.reject(new Error("turn"));
-    const same = personId && personId === currentPersonId(group);
-    if (same && !useSample) {
+    if (fullyNamed(group, personId) && !useSample) {
       closePopover(true);
       return Promise.resolve();
     }
+    if (identitySaving) return Promise.resolve();
+    identitySaving = true;
     identityError = "";
     return fetch("/v1/turns/" + turn.id + "/label", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId, use_sample: !!useSample })
+      body: JSON.stringify({ person_id: personId })
     }).then((response) => {
       if (!response.ok) throw new Error("label");
+      const person = (payload.people || []).find((item) => item.id === personId);
+      for (const member of group.turns || []) {
+        member.person_id = personId;
+        member.name = person ? person.name : member.name;
+        member.suggested_name = "";
+        member.suggested_person_id = "";
+      }
       createdPersonId = null;
       identityDraft = null;
       identityMode = "list";
       identitySample = false;
       identityError = "";
       openIdentityKey = null;
+      render();
       return loadDay();
     }).catch((error) => {
       identityError = "Could not save that identity.";
       throw error;
+    }).finally(() => {
+      identitySaving = false;
     });
   }
   function identityPopover(group) {
@@ -729,27 +829,17 @@ JS = r"""
     note.className = "meta";
     note.setAttribute("aria-live", "polite");
     if (identityError && openIdentityKey === group.key) note.textContent = identityError;
-    const sampleDetails = document.createElement("details");
-    const sampleSummary = document.createElement("summary");
-    sampleSummary.textContent = "Voice learning";
-    const sample = document.createElement("label");
-    const sampleBox = document.createElement("input");
-    sampleBox.type = "checkbox";
-    sampleBox.checked = identitySample;
-    sample.appendChild(sampleBox);
-    sample.append(" Save a voice sample from this detected voice cluster if it is long enough");
-    sampleBox.addEventListener("change", () => {
-      identitySample = sampleBox.checked;
-      if (identityMode !== "new") render();
-    });
-    sampleDetails.appendChild(sampleSummary);
-    sampleDetails.appendChild(sample);
+    else note.textContent = "Tap a name to assign this stretch.";
+    const cleanSeconds = (group.turns || []).reduce((sum, turn) => sum + (Number(turn.clean_seconds) || 0), 0);
+    const sampleReady = cleanSeconds >= 5;
+    const sampleNote = document.createElement("p");
+    sampleNote.className = "meta";
+    sampleNote.textContent = sampleReady
+      ? "Tagging this stretch also saves a voice sample."
+      : "This piece is under 5 seconds of one clean voice, so it can be named but not saved as a voice sample.";
     const footer = document.createElement("div");
     footer.className = "popover-footer";
     function currentId() { return currentPersonId(group); }
-    function draftChanged() {
-      return identityDraft && identityDraft !== currentId();
-    }
     if (identityMode === "new") {
       const name = document.createElement("input");
       name.type = "text";
@@ -790,7 +880,7 @@ JS = r"""
       footer.appendChild(back);
       footer.appendChild(create);
       box.appendChild(name);
-      box.appendChild(sampleDetails);
+      box.appendChild(sampleNote);
       box.appendChild(footer);
       box.appendChild(note);
       setTimeout(() => name.focus(), 0);
@@ -802,13 +892,15 @@ JS = r"""
       row.className = "person-option";
       row.setAttribute("aria-pressed", String((identityDraft || currentId()) === person.id));
       row.textContent = person.name;
-      row.addEventListener("click", () => {
-        identityDraft = person.id;
-        render();
-        setTimeout(() => {
-          const save = document.querySelector(".popover-footer button:last-child");
-          if (save) save.focus();
-        }, 0);
+      row.addEventListener("click", (event) => {
+        event.stopPropagation();
+        if (identitySaving) return;
+        note.textContent = "Saving…";
+        for (const button of box.querySelectorAll("button")) button.disabled = true;
+        applyIdentity(group, person.id, identitySample).catch(() => {
+          note.textContent = "Could not save that identity.";
+          for (const button of box.querySelectorAll("button")) button.disabled = false;
+        });
       });
       box.appendChild(row);
     }
@@ -818,24 +910,7 @@ JS = r"""
     create.textContent = "New person";
     create.addEventListener("click", () => { identityMode = "new"; identityDraft = null; identityNewName = ""; render(); });
     box.appendChild(create);
-    box.appendChild(sampleDetails);
-    if (draftChanged() || (identitySample && currentId())) {
-      const cancel = document.createElement("button");
-      cancel.type = "button";
-      cancel.textContent = "Cancel";
-      cancel.addEventListener("click", () => closePopover(true));
-      const save = document.createElement("button");
-      save.type = "button";
-      save.textContent = draftChanged() ? actionLabel(group, identityDraft) : "Save voice sample";
-      save.addEventListener("click", async () => {
-        note.textContent = "Saving…";
-        try { await applyIdentity(group, draftChanged() ? identityDraft : currentId(), identitySample); }
-        catch (error) { note.textContent = "Could not save that identity."; }
-      });
-      footer.appendChild(cancel);
-      footer.appendChild(save);
-      box.appendChild(footer);
-    }
+    box.appendChild(sampleNote);
     box.appendChild(note);
     return box;
   }
@@ -937,7 +1012,36 @@ JS = r"""
     modes.appendChild(fullRecordingBtn);
     pane.appendChild(title);
     pane.appendChild(meta);
+    pane.appendChild(modes);
+    if (!Array.isArray(chunk.speakers)) {
+      ensureReview(chunk);
+      const waiting = document.createElement("p");
+      waiting.className = "meta";
+      waiting.textContent = "Loading speakers…";
+      pane.appendChild(waiting);
+      const body = document.createElement("p");
+      body.textContent = chunk.transcript || "No transcript yet.";
+      pane.appendChild(body);
+      return;
+    }
     const groups = groupTurns(chunk);
+    function playSpeakerPiece(group, bounds, fromStart) {
+      if (!chunk.audio_playable) return;
+      const expectedId = chunk.id;
+      const expectedGeneration = audioGeneration;
+      const startAt = Number(bounds.start) || 0;
+      const stopAt = Number(bounds.end) || 0;
+      const jump = () => {
+        if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
+        activeGroupKey = group.key;
+        clipStartTime = startAt;
+        clipStopTime = stopAt;
+        if (fromStart || player.currentTime < startAt || player.currentTime >= stopAt) player.currentTime = startAt;
+        player.play().catch(() => {});
+        updateCardPlayback();
+      };
+      if (player.readyState) jump(); else player.addEventListener("loadedmetadata", jump, { once: true });
+    }
     const speakers = document.createElement("div");
     speakers.className = "speakers";
     speakers.setAttribute("aria-label", "Speakers");
@@ -962,10 +1066,11 @@ JS = r"""
       pill.setAttribute("data-identity-key", group.key);
       pill.setAttribute("aria-expanded", String(openIdentityKey === group.key));
       pill.setAttribute("aria-haspopup", "dialog");
-      pill.setAttribute("aria-label", info.label);
+      pill.setAttribute("aria-label", "Play " + clipStart + " to " + clipEnd + " seconds");
       pill.addEventListener("click", (event) => {
         event.stopPropagation();
-        if (openIdentityKey === group.key) { closePopover(true); return; }
+        playSpeakerPiece(group, bounds, true);
+        if (openIdentityKey === group.key) return;
         openIdentityKey = group.key;
         identityError = "";
         identityDraft = currentPersonId(group) || null;
@@ -976,10 +1081,6 @@ JS = r"""
         createdPersonName = null;
         identityNewName = "";
         render();
-        setTimeout(() => {
-          const first = document.querySelector(".popover .person-option");
-          if (first) first.focus();
-        }, 0);
       });
       anchor.appendChild(pill);
       if (openIdentityKey === group.key) {
@@ -1037,22 +1138,7 @@ JS = r"""
         replay.textContent = "Replay";
         replay.setAttribute("aria-label", "Replay this speaker clip");
         replay.disabled = !chunk.audio_playable;
-        const playGroup = (fromStart) => {
-          const expectedId = chunk.id;
-          const expectedGeneration = audioGeneration;
-          const startAt = Number(bounds.start) || 0;
-          const stopAt = Number(bounds.end) || 0;
-          const jump = () => {
-            if (selectedKind !== "chunk" || selectedId !== expectedId || loadedAudioId !== ("chunk:" + expectedId + ":original") || audioGeneration !== expectedGeneration) return;
-            activeGroupKey = group.key;
-            clipStartTime = startAt;
-            clipStopTime = stopAt;
-            if (fromStart || player.currentTime < startAt || player.currentTime >= stopAt) player.currentTime = startAt;
-            player.play().catch(() => {});
-            updateCardPlayback();
-          };
-          if (player.readyState) jump(); else player.addEventListener("loadedmetadata", jump, { once: true });
-        };
+        const playGroup = (fromStart) => playSpeakerPiece(group, bounds, fromStart);
         play.addEventListener("click", () => {
           if (activeGroupKey === group.key && !player.paused) {
             player.pause();
@@ -1156,8 +1242,13 @@ JS = r"""
       closePopover(true);
     }
   });
+  document.addEventListener("pointerdown", (event) => {
+    const pop = document.querySelector(".popover");
+    const pill = openIdentityKey ? document.querySelector('[data-identity-key="' + openIdentityKey + '"]') : null;
+    identityPointerInside = !!((pop && pop.contains(event.target)) || (pill && pill.contains(event.target)));
+  }, true);
   document.addEventListener("click", (event) => {
-    if (!openIdentityKey) return;
+    if (!openIdentityKey || identityPointerInside) return;
     const pop = document.querySelector(".popover");
     const pill = document.querySelector('[data-identity-key="' + openIdentityKey + '"]');
     if (pop && pop.contains(event.target)) return;
@@ -1414,6 +1505,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
             event_id = path[len("/v1/events/"):-len("/audio")]
             kind = (parse_qs(parsed.query).get("kind") or ["original"])[0]
             return self._event_audio(event_id, kind, include_body=True)
+        if path.startswith("/v1/chunks/") and path.endswith("/review"):
+            chunk_id = path[len("/v1/chunks/"):-len("/review")]
+            review = self._inbox().chunk_review(chunk_id)
+            if not review:
+                return self._json(404, {"error": "Recording unavailable"})
+            return self._json(200, review)
         if path.startswith("/v1/days/"):
             day = path.removeprefix("/v1/days/")
             try:

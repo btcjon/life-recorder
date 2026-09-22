@@ -601,7 +601,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         one = self._run_process(
             {"segments": [{"speakerId": "S1", "startTimeSeconds": 0.2, "endTimeSeconds": 8.0, "qualityScore": 0.9}],
              "speakerCount": 1},
-            [{"cluster": 0, "rho128": [1.0] + [0.0] * 127}],
+            [{"cluster": 0, "embedding256": [1.0] + [0.0] * 255}],
             row)[0]
         self.assertEqual(one["outcome"], "success")
         self.assertEqual(one["turn_count"], 1)
@@ -613,8 +613,8 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                 {"speakerId": "S1", "startTimeSeconds": 0.0, "endTimeSeconds": 4.0, "qualityScore": 0.9},
                 {"speakerId": "S2", "startTimeSeconds": 4.0, "endTimeSeconds": 9.5, "qualityScore": 0.8},
             ], "speakerCount": 2},
-            [{"cluster": 0, "rho128": [1.0] + [0.0] * 127},
-             {"cluster": 1, "rho128": [0.0, 1.0] + [0.0] * 126}],
+            [{"cluster": 0, "embedding256": [1.0] + [0.0] * 255},
+             {"cluster": 1, "embedding256": [0.0, 1.0] + [0.0] * 254}],
             row)[0]
         self.assertEqual(two["speaker_count"], 2)
         self.assertEqual(two["turn_count"], 2)
@@ -649,7 +649,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         result = self._run_process(
             {"segments": [{"speakerId": "S1", "startTimeSeconds": 50.0, "endTimeSeconds": 70.0, "qualityScore": 1.0}],
              "speakerCount": 1},
-            [{"cluster": 0, "rho128": [1.0] + [0.0] * 127}],
+            [{"cluster": 0, "embedding256": [1.0] + [0.0] * 255}],
             current, neighbors=[earlier, current])[0]
         self.assertEqual(result["turns"][0]["started"], 0.0)
         self.assertEqual(result["turns"][0]["ended"], 10.0)
@@ -674,7 +674,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                      20.0, str(dest), 0, "complete", "hello there", 2, "present"))
             person = inbox.create_person("Jon")
             first = {"turns": [{"speaker_key": "S1", "started": 1.0, "ended": 8.0, "quality": 1.0,
-                                "embedding": [1.0] + [0.0] * 127}],
+                                "embedding": [1.0] + [0.0] * 255}],
                      "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                      "speech_seconds": 7.0, "coverage": 0.35, "turn_count": 1,
                      "embedding_count": 1, "cluster_count": 1, "asr_words": 2}
@@ -683,7 +683,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                 turn_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,)).fetchone()[0]
             self.assertTrue(inbox.label_turn(turn_id, person["id"], use_sample=True))
             second = {"turns": [{"speaker_key": "S1", "started": 1.2, "ended": 8.4, "quality": 0.9,
-                                 "embedding": [0.9] + [0.0] * 127}],
+                                 "embedding": [0.9] + [0.0] * 255}],
                       "speaker_count": 1, "processing_seconds": 0.2, "outcome": "success",
                       "speech_seconds": 7.2, "coverage": 0.36, "turn_count": 1,
                       "embedding_count": 1, "cluster_count": 1, "asr_words": 2}
@@ -714,13 +714,13 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                       "embedding_count": 1, "cluster_count": 1, "asr_words": 2}
             diarization_mod.save_result(inbox, chunk_id, {
                 **common, "turns": [{"speaker_key": "S1", "started": 1.0, "ended": 8.0,
-                                      "quality": 1.0, "embedding": [1.0] + [0.0] * 127}]})
+                                      "quality": 1.0, "embedding": [1.0] + [0.0] * 255}]})
             with inbox.connect() as db:
                 turn_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,)).fetchone()[0]
             self.assertTrue(inbox.label_turn(turn_id, person["id"], use_sample=True))
             diarization_mod.save_result(inbox, chunk_id, {
                 **common, "turns": [{"speaker_key": "S2", "started": 1.1, "ended": 8.1,
-                                      "quality": 1.0, "embedding": [1.0] + [0.0] * 127}]})
+                                      "quality": 1.0, "embedding": [1.0] + [0.0] * 255}]})
             turns = inbox.speaker_turns(chunk_id)
             self.assertEqual(turns[0]["speaker_key"], "S2")
             self.assertEqual(turns[0]["person_id"], person["id"])
@@ -731,7 +731,8 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             person = inbox.create_person("Jon")
             people = inbox.people()
             self.assertFalse(people[0]["enrollment_ready"])
-            self.assertIn("need_3_samples", people[0]["enrollment_reasons"])
+            self.assertIn("need_2_samples", people[0]["enrollment_reasons"])
+            self.assertNotIn("calibration_required", people[0]["enrollment_reasons"])
             chunk_id = str(uuid.uuid4())
             dest = inbox.audio / (chunk_id + ".m4a")
             dest.write_bytes(b"audio")
@@ -742,7 +743,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                      10.0, str(dest), 0, "complete", "present", "[]"))
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [{"speaker_key": "S1", "started": 0.0, "ended": 4.0, "quality": 1.0,
-                           "embedding": [1.0] + [0.0] * 127}],
+                           "embedding": [1.0] + [0.0] * 255}],
                 "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 4.0, "coverage": 0.4, "turn_count": 1,
                 "embedding_count": 1, "cluster_count": 1, "asr_words": 3,
@@ -753,7 +754,12 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertEqual(summary["outcome"], "success")
             self.assertEqual(summary["turn_count"], 1)
             payload = inbox.viewer_day("2026-09-10")
-            self.assertEqual(payload["chunks"][0]["diarization"]["coverage"], 0.4)
+            self.assertNotIn("diarization", payload["chunks"][0])
+            self.assertNotIn("speakers", payload["chunks"][0])
+            self.assertNotIn("words", payload["chunks"][0])
+            review = inbox.chunk_review(chunk_id)
+            self.assertEqual(review["diarization"]["coverage"], 0.4)
+            self.assertTrue(review["voice_pending"])
 
     def test_context_window_skips_neighbor_that_exceeds_remaining(self):
         device = str(uuid.uuid4())
@@ -771,7 +777,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         result = self._run_process(
             {"segments": [{"speakerId": "S1", "startTimeSeconds": 1.0, "endTimeSeconds": 8.0, "qualityScore": 1.0}],
              "speakerCount": 3},
-            [{"cluster": 0, "rho128": [1.0] + [0.0] * 127, "startTime": 1.0, "endTime": 8.0}],
+            [{"cluster": 0, "embedding256": [1.0] + [0.0] * 255, "startTime": 1.0, "endTime": 8.0}],
             row, neighbors=[earlier, row])[0]
         self.assertEqual(result["turns"], [])
         self.assertEqual(result["speaker_count"], 0)
@@ -808,15 +814,15 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                       "speech_seconds": 14.0, "coverage": 0.7, "turn_count": 2,
                       "embedding_count": 2, "cluster_count": 2, "asr_words": 4}
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S1", "started": 0.0, "ended": 8.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
-                {"speaker_key": "S2", "started": 8.0, "ended": 16.0, "quality": 1.0, "embedding": [0.0, 1.0] + [0.0] * 126},
+                {"speaker_key": "S1", "started": 0.0, "ended": 8.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
+                {"speaker_key": "S2", "started": 8.0, "ended": 16.0, "quality": 1.0, "embedding": [0.0, 1.0] + [0.0] * 254},
             ]})
             with inbox.connect() as db:
                 first, second = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,)).fetchall()
             self.assertTrue(inbox.label_turn(first[0], jon["id"], use_sample=True))
             self.assertTrue(inbox.label_turn(second[0], mia["id"], use_sample=True))
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S1", "started": 0.0, "ended": 16.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
+                {"speaker_key": "S1", "started": 0.0, "ended": 16.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
             ]})
             turns = inbox.speaker_turns(chunk_id)
             people = {turn["person_id"] for turn in turns if turn["person_id"]}
@@ -833,9 +839,9 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                       "embedding_count": 2, "cluster_count": 2, "asr_words": 4}
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
                 {"speaker_key": "S1", "started": 0.0, "ended": 8.0, "quality": 1.0,
-                 "embedding": [1.0] + [0.0] * 127},
+                 "embedding": [1.0] + [0.0] * 255},
                 {"speaker_key": "S2", "started": 8.0, "ended": 10.0, "quality": 1.0,
-                 "embedding": [0.0, 1.0] + [0.0] * 126},
+                 "embedding": [0.0, 1.0] + [0.0] * 254},
             ]})
             with inbox.connect() as db:
                 first, second = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started",
@@ -844,7 +850,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(inbox.label_turn(second[0], mia["id"], use_sample=False))
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
                 {"speaker_key": "S1", "started": 0.0, "ended": 10.0, "quality": 1.0,
-                 "embedding": [1.0] + [0.0] * 127},
+                 "embedding": [1.0] + [0.0] * 255},
             ]})
             turns = inbox.speaker_turns(chunk_id)
             merged = [turn for turn in turns if turn["started"] == 0.0 and turn["ended"] == 10.0][0]
@@ -858,7 +864,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             jon = inbox.create_person("Jon")
             mia = inbox.create_person("Mia")
             result = {"turns": [{"speaker_key": "S1", "started": 0.0, "ended": 8.0,
-                                  "quality": 1.0, "embedding": [1.0] + [0.0] * 127}],
+                                  "quality": 1.0, "embedding": [1.0] + [0.0] * 255}],
                       "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                       "speech_seconds": 8.0, "coverage": 0.4, "turn_count": 1,
                       "embedding_count": 1, "cluster_count": 1, "asr_words": 4}
@@ -881,7 +887,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                     (id,run_id,chunk_id,speaker_key,started,ended,quality,embedding_json)
                     VALUES (?,?,?,?,?,?,?,?)""",
                     (new_turn, new_run, chunk_id, "S1", 10.0, 15.0, 1.0,
-                     json.dumps([0.0, 1.0] + [0.0] * 126)))
+                     json.dumps([0.0, 1.0] + [0.0] * 254)))
             self.assertTrue(inbox.label_turn(new_turn, mia["id"], use_sample=False))
             with inbox.connect() as db:
                 self.assertEqual(db.execute("SELECT person_id FROM speaker_turns WHERE id=?",
@@ -899,14 +905,14 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                       "speech_seconds": 12.0, "coverage": 0.6, "turn_count": 1,
                       "embedding_count": 1, "cluster_count": 1, "asr_words": 4}
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S1", "started": 0.0, "ended": 12.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
+                {"speaker_key": "S1", "started": 0.0, "ended": 12.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
             ]})
             with inbox.connect() as db:
                 turn_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,)).fetchone()[0]
             self.assertTrue(inbox.label_turn(turn_id, jon["id"], use_sample=True))
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S1", "started": 0.0, "ended": 6.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
-                {"speaker_key": "S1", "started": 6.0, "ended": 12.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
+                {"speaker_key": "S1", "started": 0.0, "ended": 6.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
+                {"speaker_key": "S1", "started": 6.0, "ended": 12.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
             ]})
             turns = inbox.speaker_turns(chunk_id)
             self.assertEqual([turn["person_id"] for turn in turns], [jon["id"], jon["id"]])
@@ -919,7 +925,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             jon = inbox.create_person("Jon")
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [{"speaker_key": "S1", "started": 1.0, "ended": 8.0, "quality": 1.0,
-                           "embedding": [1.0] + [0.0] * 127}],
+                           "embedding": [1.0] + [0.0] * 255}],
                 "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 7.0, "coverage": 0.35, "turn_count": 1,
                 "embedding_count": 1, "cluster_count": 1, "asr_words": 2})
@@ -945,13 +951,13 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                       "speech_seconds": 10.0, "coverage": 0.5, "turn_count": 1,
                       "embedding_count": 1, "cluster_count": 1, "asr_words": 4}
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S1", "started": 0.0, "ended": 10.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 127},
+                {"speaker_key": "S1", "started": 0.0, "ended": 10.0, "quality": 1.0, "embedding": [1.0] + [0.0] * 255},
             ]})
             with inbox.connect() as db:
                 turn_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,)).fetchone()[0]
             self.assertTrue(inbox.label_turn(turn_id, jon["id"], use_sample=True))
             diarization_mod.save_result(inbox, chunk_id, {**common, "turns": [
-                {"speaker_key": "S2", "started": 9.0, "ended": 19.0, "quality": 1.0, "embedding": [0.0, 1.0] + [0.0] * 126},
+                {"speaker_key": "S2", "started": 9.0, "ended": 19.0, "quality": 1.0, "embedding": [0.0, 1.0] + [0.0] * 254},
             ]})
             turns = inbox.speaker_turns(chunk_id)
             labeled = [turn for turn in turns if turn["person_id"] == jon["id"]]
@@ -974,7 +980,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                      10.0, str(dest), 0, "complete", "present", "[]"))
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [{"speaker_key": "S1", "started": 0.0, "ended": 4.0, "quality": 1.0,
-                           "embedding": [1.0] + [0.0] * 127}],
+                           "embedding": [1.0] + [0.0] * 255}],
                 "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 4.0, "coverage": 0.4, "turn_count": 1,
                 "embedding_count": 1, "cluster_count": 1, "asr_words": 1,
@@ -985,7 +991,7 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             self.assertTrue(inbox.label_turn(turn_id, person["id"]))
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [{"speaker_key": "S2", "started": 5.0, "ended": 8.0, "quality": 1.0,
-                           "embedding": [0.0, 1.0] + [0.0] * 126}],
+                           "embedding": [0.0, 1.0] + [0.0] * 254}],
                 "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 3.0, "coverage": 0.3, "turn_count": 1,
                 "embedding_count": 1, "cluster_count": 1, "asr_words": 1,
@@ -1007,37 +1013,47 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             for index, row in enumerate(rows)
         ]
 
-    def test_review_groups_merge_adjacent_same_speaker_and_keep_aba_split(self):
-        merged = review_groups(self._turns(
+    def test_review_groups_merge_same_voice_and_keep_changes_split(self):
+        pieces = review_groups(self._turns(
             {"speaker_key": "S2", "started": 4.0, "ended": 20.0},
             {"speaker_key": "S2", "started": 22.0, "ended": 39.6},
             {"speaker_key": "S1", "started": 42.7, "ended": 51.0},
             {"speaker_key": "S1", "started": 53.0, "ended": 60.0},
         ))
-        self.assertEqual([(group[0]["speaker_key"], group[0]["started"], group[-1]["ended"]) for group in merged],
-                         [("S2", 4.0, 39.6), ("S1", 42.7, 60.0)])
+        self.assertEqual([(group[0]["speaker_key"], group[0]["started"], group[-1]["ended"], len(group)) for group in pieces],
+                         [("S2", 4.0, 39.6, 2), ("S1", 42.7, 60.0, 2)])
         aba = review_groups(self._turns(
             {"speaker_key": "S1", "started": 0.0, "ended": 4.0},
             {"speaker_key": "S2", "started": 4.0, "ended": 8.0},
             {"speaker_key": "S1", "started": 8.0, "ended": 12.0},
         ))
         self.assertEqual([group[0]["speaker_key"] for group in aba], ["S1", "S2", "S1"])
-        overlap = review_groups(self._turns(
-            {"speaker_key": "S1", "started": 0.0, "ended": 10.0},
-            {"speaker_key": "S2", "started": 4.0, "ended": 8.0},
-            {"speaker_key": "S1", "started": 10.0, "ended": 14.0},
-        ))
-        self.assertEqual([group[0]["speaker_key"] for group in overlap], ["S1", "S2", "S1"])
+        self.assertTrue(all(len(group) == 1 for group in aba))
         conflict = review_groups(self._turns(
             {"speaker_key": "S1", "started": 0.0, "ended": 4.0, "person_id": "jon"},
             {"speaker_key": "S1", "started": 4.0, "ended": 8.0, "person_id": "mia"},
         ))
         self.assertEqual(len(conflict), 2)
-        unknown = review_groups(self._turns(
-            {"speaker_key": "S1", "started": 0.0, "ended": 4.0},
-            {"speaker_key": "S3", "started": 4.0, "ended": 8.0},
+        named = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 4.3, "ended": 6.5, "person_id": "john"},
+            {"speaker_key": "S1", "started": 10.6, "ended": 11.0, "person_id": "john"},
+            {"speaker_key": "S1", "started": 13.7, "ended": 14.2},
         ))
-        self.assertEqual([group[0]["speaker_key"] for group in unknown], ["S1", "S3"])
+        self.assertEqual(len(named), 1)
+        self.assertEqual(len(named[0]), 3)
+        self.assertIsNone(named[0][2]["person_id"])
+        runs = review_groups(self._turns(
+            {"speaker_key": "S1", "started": 0.0, "ended": 4.0, "run_id": "a"},
+            {"speaker_key": "S1", "started": 5.0, "ended": 9.0, "run_id": "b"},
+        ))
+        self.assertEqual(len(runs), 2)
+        overlap = review_groups(self._turns(
+            {"speaker_key": "S2", "started": 0.0, "ended": 8.0},
+            {"speaker_key": "S1", "started": 2.0, "ended": 4.0},
+            {"speaker_key": "S1", "started": 6.0, "ended": 10.0},
+        ))
+        self.assertEqual([group[0]["speaker_key"] for group in overlap], ["S2", "S1", "S1"])
+        self.assertTrue(all(len(group) == 1 for group in overlap))
 
     def test_labeling_one_a_b_a_turn_does_not_label_the_other_a(self):
         scratch, inbox, chunk_id = self._labeled_inbox()
@@ -1046,11 +1062,11 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [
                     {"speaker_key": "S1", "started": 0.0, "ended": 4.0, "quality": 1.0,
-                     "embedding": [1.0] + [0.0] * 127},
+                     "embedding": [1.0] + [0.0] * 255},
                     {"speaker_key": "S2", "started": 4.0, "ended": 8.0, "quality": 1.0,
-                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                     "embedding": [0.0, 1.0] + [0.0] * 254},
                     {"speaker_key": "S1", "started": 8.0, "ended": 12.0, "quality": 1.0,
-                     "embedding": [1.0] + [0.0] * 127},
+                     "embedding": [1.0] + [0.0] * 255},
                 ],
                 "speaker_count": 2, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 12.0, "coverage": 0.6, "turn_count": 3,
@@ -1065,18 +1081,19 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
                     "SELECT person_id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,))]
             self.assertEqual(labels, [person["id"], None, None])
 
-    def test_labeling_merged_group_updates_only_contiguous_turns(self):
+    def test_labeling_one_fragment_leaves_the_other_unlabeled(self):
         scratch, inbox, chunk_id = self._labeled_inbox()
         with scratch:
             person = inbox.create_person("Jon")
+            mia = inbox.create_person("Mia")
             diarization_mod.save_result(inbox, chunk_id, {
                 "turns": [
                     {"speaker_key": "S2", "started": 4.0, "ended": 20.0, "quality": 1.0,
-                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                     "embedding": [0.0, 1.0] + [0.0] * 254},
                     {"speaker_key": "S2", "started": 22.0, "ended": 39.6, "quality": 1.0,
-                     "embedding": [0.0, 1.0] + [0.0] * 126},
+                     "embedding": [0.0, 1.0] + [0.0] * 254},
                     {"speaker_key": "S1", "started": 42.7, "ended": 60.0, "quality": 1.0,
-                     "embedding": [1.0] + [0.0] * 127},
+                     "embedding": [1.0] + [0.0] * 255},
                 ],
                 "speaker_count": 2, "processing_seconds": 0.1, "outcome": "success",
                 "speech_seconds": 50.9, "coverage": 0.8, "turn_count": 3,
@@ -1085,11 +1102,42 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
             with inbox.connect() as db:
                 turns = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=? ORDER BY started",
                                    (chunk_id,)).fetchall()
+            self.assertTrue(inbox.label_turn(turns[2][0], mia["id"]))
             self.assertTrue(inbox.label_turn(turns[0][0], person["id"]))
             with inbox.connect() as db:
                 labels = [row[0] for row in db.execute(
                     "SELECT person_id FROM speaker_turns WHERE chunk_id=? ORDER BY started", (chunk_id,))]
-            self.assertEqual(labels, [person["id"], person["id"], None])
+            self.assertEqual(labels, [person["id"], person["id"], mia["id"]])
+
+    def test_short_fragment_labels_without_enrolling_the_shared_track(self):
+        scratch, inbox, chunk_id = self._labeled_inbox()
+        with scratch:
+            person = inbox.create_person("Jon")
+            diarization_mod.save_result(inbox, chunk_id, {
+                "turns": [
+                    {"speaker_key": "S1", "started": 0.0, "ended": 3.0, "quality": 1.0,
+                     "embedding": [1.0] + [0.0] * 255},
+                    {"speaker_key": "S1", "started": 3.0, "ended": 9.0, "quality": 1.0,
+                     "embedding": [1.0] + [0.0] * 255},
+                ],
+                "speaker_count": 1, "processing_seconds": 0.1, "outcome": "success",
+                "speech_seconds": 9.0, "coverage": 0.45, "turn_count": 2,
+                "embedding_count": 2, "cluster_count": 1, "asr_words": 0,
+            })
+            turns = inbox.speaker_turns(chunk_id)
+            self.assertEqual([turn["clean_seconds"] for turn in turns], [3.0, 6.0])
+            self.assertEqual(turns[0]["track_id"], turns[1]["track_id"])
+            self.assertTrue(inbox.label_turn(turns[0]["id"], person["id"], use_sample=True))
+            labeled = inbox.speaker_turns(chunk_id)
+            self.assertEqual(labeled[0]["person_id"], person["id"])
+            self.assertEqual(labeled[1]["person_id"], person["id"])
+            with inbox.connect() as db:
+                samples = db.execute("SELECT duration FROM voice_samples").fetchall()
+                enrolled_turns = {row[0] for row in db.execute(
+                    "SELECT DISTINCT turn_id FROM voice_vectors WHERE enrolled=1")}
+            self.assertEqual(len(samples), 1)
+            self.assertAlmostEqual(samples[0]["duration"], 9.0)
+            self.assertEqual(enrolled_turns, {turns[0]["id"], turns[1]["id"]})
 
     def test_identity_editor_starts_empty_for_zero_or_one_person(self):
         self.assertIn("No people yet", viewer_mod.JS)
@@ -1103,7 +1151,10 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         self.assertIn("Unknown · No speaker turns available", viewer_mod.JS)
         self.assertIn("aria-expanded", viewer_mod.JS)
         self.assertIn("Create & assign", viewer_mod.JS)
-        self.assertIn("Save voice sample", viewer_mod.JS)
+        self.assertIn("Tap a name to assign this stretch.", viewer_mod.JS)
+        self.assertIn("Tagging this stretch also saves a voice sample.", viewer_mod.JS)
+        self.assertIn('named.name + " · Auto"', viewer_mod.JS)
+        self.assertIn("identitySaving", viewer_mod.JS)
         self.assertIn("New person", viewer_mod.JS)
         self.assertIn("closePopover", viewer_mod.JS)
         self.assertIn('key: chunk.id + ":" + turn.id', viewer_mod.JS)
@@ -1118,9 +1169,14 @@ class DiarizationDiagnosticsTests(unittest.TestCase):
         self.assertIn("Could not save that identity.", viewer_mod.JS)
         self.assertIn("activeGroupKey = null", viewer_mod.JS)
         self.assertIn("canMergeTurns", viewer_mod.JS)
+        self.assertIn("turns: [turn]", viewer_mod.JS)
+        self.assertIn("clean_seconds", viewer_mod.JS)
+        self.assertIn("This piece is under 5 seconds of one clean voice, so it can be named but not saved as a voice sample.", viewer_mod.JS)
         self.assertIn("head.appendChild(group.identityAnchor)", viewer_mod.JS)
         self.assertIn("player.currentTime < clipStartTime", viewer_mod.JS)
         self.assertIn("One more confirmed voice sample needed for ", viewer_mod.JS)
+        self.assertIn('"/v1/chunks/" + chunkId + "/review"', viewer_mod.JS)
+        self.assertIn("Loading speakers…", viewer_mod.JS)
         self.assertIn(".popover", viewer_mod.CSS)
 
 

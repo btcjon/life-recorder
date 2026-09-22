@@ -150,9 +150,11 @@ class PersistenceAndPlaybackTests(unittest.TestCase):
                 cols = {row[1] for row in db.execute("PRAGMA table_info(chunks)")}
                 tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
                 event_cols = {row[1] for row in db.execute("PRAGMA table_info(speech_events)")}
-            self.assertEqual(version, 6)
+            self.assertEqual(version, 8)
             self.assertIn("vad_status", cols)
             self.assertIn("speech_events", tables)
+            self.assertIn("voice_vectors", tables)
+            self.assertIn("voice_tracks", tables)
             self.assertIn("chunk_speech_spans", tables)
             self.assertIn("playable_duration", event_cols)
             self.assertIn("derived_bytes", event_cols)

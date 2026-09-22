@@ -7,6 +7,9 @@ import math
 import os
 import shutil
 import subprocess
+
+import decoded_audio
+import diarization as diarization_mod
 import tempfile
 import threading
 import time
@@ -156,13 +159,12 @@ def normalize_spans(spans, duration: float, pad: float = PAD_SECONDS,
 
 def process_chunk(row, cli: Path, ffmpeg: str, work: Path) -> list[dict]:
     token = uuid.uuid4().hex
-    wav = work / f"{row['id']}-{token}-vad.wav"
     result = work / f"{row['id']}-{token}-vad.json"
     duration = float(row["duration"] or 0)
+    lease = None
     try:
-        subprocess.run([ffmpeg, "-nostdin", "-loglevel", "error", "-y", "-i", row["path"],
-                        "-ar", "16000", "-ac", "1", str(wav)], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        lease = decoded_audio.acquire(ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run)
+        wav = lease.path
         completed = subprocess.run(
             [str(cli), "vad-analyze", str(wav),
              "--min-speech-ms", "0",
@@ -176,7 +178,8 @@ def process_chunk(row, cli: Path, ffmpeg: str, work: Path) -> list[dict]:
             raise VadError("Missing VAD output")
         return parse_vad_output(result, duration)
     finally:
-        wav.unlink(missing_ok=True)
+        if lease is not None:
+            lease.release()
         result.unlink(missing_ok=True)
 
 
@@ -536,9 +539,11 @@ def worker(inbox, stop, cli: Path, ffmpeg: str, enhance_cli: Path | None = None)
             stop.wait(3)
             continue
         try:
+            diarization_mod.refresh_decoded_pins(inbox)
             spans = process_chunk(row, cli, ffmpeg, work)
             save_chunk_spans(inbox, row["id"], spans)
             rebuild_events(inbox)
+            diarization_mod.refresh_decoded_pins(inbox)
         except Exception as error:
             attempts = int(row["vad_attempts"] or 0) + 1
             with inbox.connect() as db:

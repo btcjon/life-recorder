@@ -9,6 +9,7 @@ Two statements later in this journal described the 2026-09-19 install and are no
 - Data directory: `~/Library/Application Support/LifeRecorder`
 - Upload listener: port 8766. Viewer: `127.0.0.1:8767`
 - Launch agent `com.browseruse.life-recorder.receiver` has `LIFE_RECORDER_REMOTE_SUMMARIES=1`, so event summaries run on this Mac. The code default is off.
+- Agent search is `POST /v1/search` and `POST /v1/events/{id}/read` on `https://lr.genr8ive.ai`. This Mac's launch agent allowlists the Life Recorder Cloudflare Access service token in `LIFE_RECORDER_AGENT_CLIENT_IDS`. Agents read `LIFE_RECORDER_CF_ACCESS_CLIENT_ID` and `LIFE_RECORDER_CF_ACCESS_CLIENT_SECRET` from `secrets.common.env`. Those values are not stored in this repo.
 - Sidebar grouping, speaker badges, and cached summaries are specified in `README.md`.
 
 ## 2026-09-19 journal

@@ -126,7 +126,7 @@ class ActivityShadowTests(unittest.TestCase):
         self.assertEqual(summary["would_hold"], 1)
         self.assertEqual(summary["hold_vad_positive"], 1)
         self.assertEqual(summary["vad_complete"], 2)
-        self.assertIn("shadow-hold", viewer_mod.JS)
+        self.assertNotIn("shadow-hold", viewer_mod.JS)
         self.assertIn("hold/VAD disagreement", viewer_mod.JS)
 
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 
+import agent_api
 import event_summaries
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -241,6 +242,7 @@ def migrate_schema(db) -> None:
         "INSERT OR IGNORE INTO voice_maintenance (id, recover_complete, startup_sweep_complete) VALUES (1, 0, 0)"
     )
     event_summaries.ensure_schema(db)
+    agent_api.ensure_schema(db)
     _purge_legacy_voice_embeddings(db)
     if version < SCHEMA_VERSION:
         db.execute(f"PRAGMA user_version={SCHEMA_VERSION}")

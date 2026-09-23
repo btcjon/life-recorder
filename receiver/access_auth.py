@@ -14,6 +14,10 @@ class AccessAuthError(Exception):
     pass
 
 
+class VerificationUnavailable(AccessAuthError):
+    """JWKS or key lookup failed. Callers should fail closed with 503."""
+
+
 @dataclass(frozen=True)
 class RemoteAccessConfig:
     host: str
@@ -45,6 +49,20 @@ class RemoteAccessConfig:
             jwks_url=f"https://{team}/cdn-cgi/access/certs",
         )
 
+
+
+def _token_key_rejected(error: Exception) -> bool:
+    """A bad or missing kid is the caller's token. A failed JWKS fetch is not."""
+    try:
+        from jwt.exceptions import PyJWKClientConnectionError, PyJWKClientError
+    except ImportError:
+        return False
+    if isinstance(error, PyJWKClientConnectionError):
+        return False
+    if not isinstance(error, PyJWKClientError):
+        return False
+    message = str(error)
+    return message.startswith("Unable to find a signing key")
 
 class AccessVerifier:
     def __init__(self, config: RemoteAccessConfig, client=None):
@@ -84,6 +102,15 @@ class AccessVerifier:
             raise AccessAuthError("Access JWT must be RS256")
         try:
             signing_key = self._jwks_client().get_signing_key_from_jwt(token)
+        except AccessAuthError:
+            raise
+        except InvalidTokenError as error:
+            raise AccessAuthError("Invalid Access JWT") from error
+        except Exception as error:
+            if _token_key_rejected(error):
+                raise AccessAuthError("Invalid Access JWT") from error
+            raise VerificationUnavailable("Access verification is unavailable") from error
+        try:
             payload = jwt.decode(
                 token,
                 signing_key.key,

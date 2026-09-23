@@ -49,6 +49,11 @@ def main():
         errors = []
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.goto(url, wait_until="domcontentloaded")
+        page.wait_for_selector(".row, .event-toggle", timeout=10000)
+        toggle = page.locator(".event-toggle")
+        if toggle.count():
+            toggle.first.click()
+            page.wait_for_selector(".event .row", timeout=5000)
         page.wait_for_selector(".row", timeout=10000)
         page.wait_for_function("() => document.getElementById('status').textContent !== 'Loading'", timeout=10000)
         page.locator(selector).click()

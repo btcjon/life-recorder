@@ -13,9 +13,12 @@ def main():
         errors = []
         page.on("pageerror", lambda exc: errors.append(str(exc)))
         page.goto(url, wait_until="domcontentloaded")
-        page.wait_for_selector(".row", timeout=10000)
+        page.wait_for_selector(".row, .event-toggle", timeout=10000)
         page.wait_for_function("() => document.getElementById('status').textContent !== 'Loading'", timeout=10000)
         page.wait_for_selector("#pane h2", timeout=10000)
+        if len(sys.argv) > 3:
+            page.locator(sys.argv[3]).click()
+            page.wait_for_selector(".event .row", timeout=5000)
         rows = page.locator(".row")
         count = rows.count()
         if count < 20:
@@ -66,6 +69,7 @@ def main():
                 titleText: title ? title.textContent : "",
                 paneChildCount: pane ? pane.childElementCount : 0,
                 paneText: pane ? pane.innerText.slice(0, 400) : "",
+                expandedRows: document.querySelectorAll('.event .row').length,
                 nowPlaying: document.getElementById('now-playing').textContent
               };
             }""",

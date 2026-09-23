@@ -5,7 +5,7 @@ description: Build, install, pair, and operate the Life Recorder iPhone-to-Mac l
 
 # Life Recorder setup
 
-Build the native iOS target in `ios/LifeRecorder.xcodeproj`, configure the Python receiver in `receiver/`, and keep all runtime state outside the repository.
+Build the native iOS target in `ios/LifeRecorder.xcodeproj`, configure the Python receiver in `receiver/`, and keep all runtime state outside the repository. Read `AGENTS.md` for project boundaries and `OPERATIONS.md` before restarting the installed service; `README.md` is the behavior contract.
 
 ## Phone control
 

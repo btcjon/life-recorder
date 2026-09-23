@@ -73,7 +73,7 @@ class ViewerDesktopLayoutTests(unittest.TestCase):
                 url = "http://127.0.0.1:%s/#%s" % (port, token)
                 selector = "#recording-" + last_id
                 result = subprocess.run(
-                    [python, str(PROBE), url, selector],
+                    [python, str(PROBE), url, selector, ".event-toggle"],
                     capture_output=True,
                     text=True,
                     timeout=60,
@@ -93,6 +93,7 @@ class ViewerDesktopLayoutTests(unittest.TestCase):
                 self.assertGreater(metrics["title"]["visible"], 10)
                 self.assertGreater(metrics["paneChildCount"], 1)
                 self.assertIn("Speaker turn transcript", metrics["paneText"])
+                self.assertGreater(metrics["expandedRows"], 1)
                 self.assertTrue(metrics["footer"]["inView"])
                 self.assertGreater(metrics["list"]["scrollHeight"], metrics["list"]["clientHeight"])
                 self.assertGreater(metrics["list"]["scrollTop"], 0)

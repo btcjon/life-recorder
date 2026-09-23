@@ -56,9 +56,10 @@ class SummaryPolicyTests(unittest.TestCase):
     def test_output_limits(self):
         self.assertEqual(event_summaries.validate_summary("  They compared notes.  "), "They compared notes.")
         self.assertIsNone(event_summaries.validate_summary("   "))
-        self.assertIsNone(event_summaries.validate_summary("One. Two. Three. Four."))
-        self.assertIsNone(event_summaries.validate_summary(" ".join(["word"] * 61)))
-        self.assertIsNotNone(event_summaries.validate_summary(" ".join(["word"] * 60)))
+        self.assertIsNone(event_summaries.validate_summary("One. Two. Three."))
+        self.assertIsNotNone(event_summaries.validate_summary("One. Two."))
+        self.assertIsNone(event_summaries.validate_summary(" ".join(["word"] * 17)))
+        self.assertIsNotNone(event_summaries.validate_summary(" ".join(["word"] * 16)))
 
     def test_command_keeps_the_transcript_off_the_argument_list(self):
         secret = "private household sentence"

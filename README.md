@@ -2,7 +2,7 @@
 
 A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 4 GiB) for playback and offline speaker diarization; selected clips can be kept longer. Transcription stays on this Mac. Optional event summaries are separate and stay off unless `LIFE_RECORDER_REMOTE_SUMMARIES=1`.
 
-The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker badges, and manual speaker naming. Current behavior is [Architecture](#architecture). `INSTALL-NOTES.md` is a dated setup journal, not the source of truth.
+The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker badges, and manual speaker naming. Current behavior is [Architecture](#architecture). See [OPERATIONS.md](OPERATIONS.md) for safe restart and recovery; [INSTALL-NOTES.md](INSTALL-NOTES.md) is a dated setup journal, not the source of truth. Contributors should also read [AGENTS.md](AGENTS.md).
 
 ## Requirements
 
@@ -88,7 +88,13 @@ Sidebar groups come from `display_blocks` in `receiver/viewer.py`. That function
 
 ### Event summaries
 
-Summaries stay off unless the receiver process has `LIFE_RECORDER_REMOTE_SUMMARIES=1`. One background worker handles one unchanged event at a time, newest first, after 120 seconds without a change to that event. The transcript goes to the local `grok` command on standard input, not in the process arguments. A stored summary is at most three sentences and 60 words. Transcript text over the size budget is sampled from the beginning, middle, and end and labeled a partial summary. The cache key changes when membership, order, transcript text, or the prompt changes. A speaker-name change does not invalidate it. A failure retries after 15 minutes and does not block the next event. The day request only reads the cache. Whether this Mac has the flag set is recorded in `INSTALL-NOTES.md`, not here.
+Summaries stay off unless the receiver process has `LIFE_RECORDER_REMOTE_SUMMARIES=1`. One background worker handles one unchanged event at a time, newest first, after 120 seconds without a change to that event. The transcript goes to the local `grok` command on standard input, not in the process arguments. A stored summary is at most two sentences and 16 words, so it fits the two-line event card. Transcript text over the size budget is sampled from the beginning, middle, and end and labeled a partial summary. The cache key changes when membership, order, transcript text, or the prompt changes. A speaker-name change does not invalidate it. A failure retries after 15 minutes and does not block the next event. The day request only reads the cache. Whether this Mac has the flag set is recorded in `INSTALL-NOTES.md`, not here.
+
+### Agent search
+
+Approved agents call `https://lr.genr8ive.ai`. They send `CF-Access-Client-Id` and `CF-Access-Client-Secret` to Cloudflare. The viewer only trusts the `Cf-Access-Jwt-Assertion` Cloudflare adds, and only when that token's `common_name` is listed in `LIFE_RECORDER_AGENT_CLIENT_IDS`. That credential can `POST /v1/search` and `POST /v1/events/{id}/read`. It cannot open a day, play audio, or change anything. Search text goes in the JSON body. Results are short. Exact transcript text is a separate paged read. The global skill `life-recorder` is the agent procedure. An empty allowlist means no agent access.
+
+The receiver maintains stable event IDs and a private SQLite FTS index as clips change; it does not rebuild search during a read. Search can filter by literal words, time, and a confirmed person. Event reads offer a short overview or bounded transcript pages. Signed cursors detect changed search results or event content and require a fresh request rather than silently continuing stale pagination. A human-confirmed speaker change updates search generation. A missing or unknown JWT key is unauthorized; unavailable verification material fails closed as temporarily unavailable. The index schema migrates on a receiver reconciliation, so use the backup and two-pass rehearsal in [OPERATIONS.md](OPERATIONS.md) before deploying changes.
 
 ### Boundaries
 

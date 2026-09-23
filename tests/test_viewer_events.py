@@ -9,8 +9,9 @@ import viewer
 class ViewerEventMarkupTests(unittest.TestCase):
     def test_event_header_clamps_the_summary_and_uses_text(self):
         css = viewer.CSS
-        self.assertIn("-webkit-line-clamp: 3", css)
-        self.assertIn("max-height: 4.05em", css)
+        self.assertIn("-webkit-line-clamp: 2", css)
+        self.assertIn("max-height: 2.7em", css)
+        self.assertIn("font-weight: 400", css)
         self.assertIn(".badge.unconfirmed", css)
         script = viewer.JS
         for phrase in (

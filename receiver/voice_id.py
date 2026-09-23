@@ -830,6 +830,9 @@ def _write_automatic(db, group, person_id: str) -> bool:
             (*turn_ids, person_id),
         )
         return False
+    import agent_api
+    chunk_ids = [turn["chunk_id"] for turn in group if "chunk_id" in turn.keys() and turn["chunk_id"]]
+    agent_api.note_speaker_change(db, chunk_ids)
     return True
 
 

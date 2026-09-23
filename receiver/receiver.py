@@ -29,6 +29,7 @@ import detector as detector_mod
 import meetings as meetings_mod
 import viewer as viewer_mod
 import decoded_audio
+import agent_api
 import event_summaries
 import diarization as diarization_mod
 import vad as vad_mod
@@ -169,6 +170,7 @@ class Inbox:
                 attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
                 error TEXT, received REAL NOT NULL)""")
             meetings_mod.migrate_schema(db)
+            agent_api.reconcile(db, viewer_mod.display_blocks)
         # Recover a crash after a transcript transaction but before Markdown refresh.
         self.export()
         self.cleanup_completed()
@@ -251,6 +253,7 @@ class Inbox:
                      json.dumps(summary), word_count, density, now, audio_bytes,
                      now + RETENTION_SECONDS, json.dumps(words or []), chunk_id),
                 )
+                agent_api.reconcile(db, viewer_mod.display_blocks, {chunk_id})
             self.export()
             # Keep completed audio for playback and speaker enrichment, within bounded limits.
             self.cleanup_completed()
@@ -768,6 +771,12 @@ class Inbox:
         with self.connect() as db:
             result = db.execute("UPDATE people SET name=?,updated_at=? WHERE id=?",
                                 (name, time.time(), person_id))
+            if result.rowcount:
+                rows = db.execute(
+                    "SELECT DISTINCT chunk_id FROM speaker_turns WHERE person_id=?",
+                    (person_id,),
+                ).fetchall()
+                agent_api.note_speaker_change(db, [row["chunk_id"] for row in rows])
         return {"id": person_id, "name": name} if result.rowcount else None
 
     def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
@@ -785,14 +794,25 @@ class Inbox:
                 matching = [turn]
             turn_ids = [candidate["id"] for candidate in matching]
             placeholders = ",".join("?" for _ in turn_ids)
+            before = {
+                row["id"]: (row["person_id"], row["label_source"])
+                for row in db.execute(
+                    f"SELECT id, person_id, label_source FROM speaker_turns WHERE id IN ({placeholders})",
+                    turn_ids,
+                )
+            }
             db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
                 WHERE id IN ({placeholders})""", (person_id, *turn_ids))
+            changed = any(before.get(turn_id) != (person_id, "confirmed") for turn_id in turn_ids)
             db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
             voice_id.clear_enrollment(db, turn_ids)
             enrolled = voice_id.enroll_turns(db, matching, person_id)
             voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
             if enrolled.get("enrolled"):
                 voice_id.enqueue_unlabeled(db, "sample")
+            agent_api.reconcile(db, viewer_mod.display_blocks, {turn["chunk_id"]})
+            if changed:
+                agent_api.note_speaker_change(db, [turn["chunk_id"]])
         return True
 
 

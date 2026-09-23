@@ -13,7 +13,8 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from zoneinfo import ZoneInfo
 
-from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig
+from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig, VerificationUnavailable
+from agent_api import http as agent_http
 
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
@@ -165,7 +166,7 @@ APP = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#245fcc">
+<meta name="theme-color" content="#0c1218">
 <title>Life Recorder</title>
 <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16.png">
 <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32.png">
@@ -176,18 +177,18 @@ APP = """<!doctype html>
 <a class="skip" href="#pane">Skip to recording</a>
 <header>
   <div class="header-primary">
-    <h1>Life Recorder</h1>
+    <img class="brand" src="/favicon-32.png" width="32" height="32" alt="Life Recorder">
     <nav aria-label="Library">
       <button id="tab-recordings" type="button" aria-pressed="true">Recordings</button>
       <button id="tab-people" type="button" aria-pressed="false">People</button>
     </nav>
-    <label class="day-control">Day <input id="day" type="date"></label>
+    <label class="day-control"><input id="day" type="date" aria-label="Day"></label>
     <button id="refresh" type="button">Refresh</button>
   </div>
   <details id="filters" open>
     <summary>Filters</summary>
     <div class="filter-body">
-      <label>Search <input id="search" type="search" placeholder="Search recordings"></label>
+      <label class="search-field"><input id="search" type="search" placeholder="Search recordings" aria-label="Search recordings"></label>
       <label><input id="show-all" type="checkbox"> Show quiet/pending</label>
       <label><input id="flat-list" type="checkbox"> Flat list</label>
     </div>
@@ -213,88 +214,101 @@ APP = """<!doctype html>
   </div>
   <button id="keep" type="button" hidden>Keep audio</button>
 </footer>
-<p id="help">Possible event labels are heuristic. TV or podcasts can still match. Audio is retained for seven days by default; Keep protects a clip. Enhanced playback is optional and never used for transcription.</p>
 <script src="/app.js"></script>
 </body>
 </html>
 """
 CSS = """
-:root { color-scheme: light; --sidebar: 304px; --canvas: #f5f6f8; --rail: #eceff3; --surface: #fff; --text: #18212f; --muted: #596577; --line: #dce1e8; --accent: #245fcc; --accent-soft: #eaf1ff; }
+:root { color-scheme: dark; --sidebar: 340px; --canvas: #0c1218; --rail: #10161d; --surface: #161e27; --text: #e7eef6; --muted: #8ea0b3; --line: #2a3948; --accent: #8fb8b2; --accent-soft: rgba(143,184,178,.10); --danger: #ff6b6b; }
 * { box-sizing: border-box; }
 html, body { margin: 0; min-width: 0; overflow-wrap: anywhere; font: 14px/1.5 -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif; background: var(--canvas); color: var(--text); }
 body { min-height: 100vh; display: flex; flex-direction: column; }
 main { flex: 1 1 auto; min-height: 0; }
 .skip { position: absolute; left: -999px; }
-.skip:focus { left: 12px; top: 12px; z-index: 10; background: #fff; padding: 8px; border-radius: 8px; }
-header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 64px; padding: 12px 20px; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); background: rgba(255,255,255,.94); border-bottom: 1px solid var(--line); }
+.skip:focus { left: 12px; top: 12px; z-index: 10; background: var(--surface); padding: 8px; border-radius: 8px; }
+header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-height: 64px; padding: 12px 20px; padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); background: #0e141b; border-bottom: 1px solid var(--line); }
 .header-primary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-width: 0; }
 #filters { margin: 0; padding: 0; border: 0; }
-#filters .filter-body { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
-h1 { margin: 0 12px 0 0; font-size: 18px; letter-spacing: -.01em; }
-h2 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+#filters .filter-body { display: flex; flex-wrap: nowrap; gap: 10px; align-items: center; min-width: 0; }
+#filters .filter-body input[type="search"] { width: 11rem; min-width: 8rem; }
+
+#search { width: 13rem; padding-left: 32px; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='none' stroke='%238ea0b3' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='7' cy='7' r='4.5'/%3E%3Cpath d='M10.5 10.5 14 14'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: 10px center; }
+nav button, #refresh { display: inline-flex; align-items: center; gap: 6px; }
+nav button::before, #refresh::before { content: ""; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--glyph) center / contain no-repeat; mask: var(--glyph) center / contain no-repeat; }
+#tab-recordings { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M2 3h12v2H2zm0 4h12v2H2zm0 4h8v2H2z'/%3E%3C/svg%3E"); }
+#tab-people { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M8 8a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm-5 6a5 5 0 0 1 10 0z'/%3E%3C/svg%3E"); }
+#refresh { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M13 8a5 5 0 1 1-1.2-3.2L10 6.5h4V2.5L12.4 4A6.5 6.5 0 1 0 14.5 8z'/%3E%3C/svg%3E"); }
+.brand { display: block; width: 32px; height: 32px; margin: 0 4px 0 0; }
+h2 { margin: 0; font-size: 28px; letter-spacing: -.03em; font-weight: 680; }
 h3 { margin: 0 0 6px; font-size: 14px; }
 nav { display: flex; gap: 6px; }
-button, select, input { min-height: 34px; padding: 6px 10px; border: 1px solid #c9d0da; border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+button, select, input { min-height: 34px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); font: inherit; }
 #back-recordings { display: none; }
 button { cursor: pointer; font-weight: 550; }
-button:hover { border-color: #9eabbc; background: #f8fafc; }
-button[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); color: #184b9f; }
+button:hover { border-color: #3d5164; background: #1c2733; }
+button[aria-pressed="true"] { border-color: rgba(143,184,178,.28); background: var(--accent-soft); color: #c5d9d4; }
 button:disabled { cursor: default; opacity: .55; }
-button:focus-visible, select:focus-visible, input:focus-visible, .row:focus-visible, summary:focus-visible { outline: 3px solid rgba(36,95,204,.3); outline-offset: 2px; }
+button:focus-visible, select:focus-visible, input:focus-visible, .row:focus-visible, summary:focus-visible { outline: 3px solid rgba(143,184,178,.22); outline-offset: 2px; }
 header label { display: flex; gap: 6px; align-items: center; color: var(--muted); font-size: 12px; }
-#status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; }
+#status { margin: 0 0 0 auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+#status.alert { color: #ff8f8f; }
+#status.alert::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--danger); vertical-align: 1px; }
 #library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
 aside, #pane, #people-view { overflow: auto; min-height: 0; }
-aside { min-width: 280px; max-width: 320px; width: var(--sidebar); padding: 8px; background: var(--rail); border-right: 1px solid var(--line); }
+aside { min-width: 300px; max-width: 360px; width: var(--sidebar); padding: 12px; background: var(--rail); border-right: 1px solid var(--line); }
 aside .row { padding: 6px 8px; margin: 0 0 4px; border-radius: 8px; line-height: 1.25; }
 aside .preview { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-aside .event { margin: 0 0 4px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
-aside .event-toggle { width: 100%; min-height: 0; padding: 0; border: 0; background: transparent; box-shadow: none; text-align: left; font-weight: 650; line-height: 1.25; }
+aside .event { margin: 0 0 8px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+aside .event:has([aria-current="true"]) { border-color: rgba(143,184,178,.38); box-shadow: none; }
+aside .event-toggle { position: relative; width: 100%; min-height: 0; padding: 0 16px 0 0; border: 0; background: transparent; box-shadow: none; text-align: left; font-weight: 450; line-height: 1.25; color: var(--text); }
+.event-title { font-weight: 640; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+aside .event-toggle::after { content: "›"; position: absolute; right: 0; top: 0; color: var(--muted); font-weight: 500; }
+aside .event-toggle[aria-expanded="true"]::after { content: "⌄"; }
 aside .event .row { margin: 4px 0 0; }
 aside .event-people { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .badge.unconfirmed { background: transparent; border: 1px solid var(--line); color: var(--muted); }
-.event-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; line-height: 1.35; max-height: 4.05em; margin-top: 4px; }
+.toolbar button[aria-pressed="true"] { border-color: rgba(143,184,178,.28); background: rgba(143,184,178,.14); color: #d7e6e2; }
+.event-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; max-height: 2.7em; margin-top: 6px; font-weight: 400; font-size: 13px; color: #c5d0db; }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
 #pane > * { max-width: 860px; }
 #people-view { padding: 28px clamp(22px, 5vw, 64px) 100px; }
-.row, .item, .person, .group { border: 1px solid var(--line); padding: 12px; margin: 0 0 9px; background: var(--surface); border-radius: 11px; box-shadow: 0 1px 2px rgba(24,33,47,.035); }
+.row, .item, .person, .group { border: 1px solid var(--line); padding: 12px; margin: 0 0 9px; background: var(--surface); border-radius: 12px; }
 .row { width: 100%; text-align: left; cursor: pointer; font-weight: 500; }
-.row[aria-current="true"] { border-color: #9fbbef; background: var(--accent-soft); box-shadow: 0 0 0 1px rgba(36,95,204,.08); }
+.row[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
 .badge { display: inline-block; padding: 2px 8px; margin-right: 6px; border: 0; border-radius: 999px; font-size: 11px; font-weight: 650; }
-.manual, .confirmed { background: #dff4e8; color: #17643a; }
-.possible, .preserved { background: #fff0ce; color: #805800; }
-.unknown { background: #edf0f4; color: #566273; }
-.suggested { background: #e4edff; color: #2455a7; }
+.manual, .confirmed { background: rgba(143,184,178,.08); color: #c5d9d4; border: 1px solid rgba(143,184,178,.22); }
+.possible, .preserved { background: rgba(255,196,87,.14); color: #ffd98a; }
+.unknown { background: #1c2733; color: var(--muted); }
+.suggested { background: rgba(120,170,255,.14); color: #c5d8ff; }
 .meta { color: var(--muted); font-size: 12px; }
 .preview { margin: 4px 0 0; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 .speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; position: relative; }
 .pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
-.pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(36,95,204,.25); }
-.pill.active { box-shadow: 0 0 0 2px rgba(36,95,204,.55); }
+.pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(143,184,178,.18); }
+.pill.active { box-shadow: 0 0 0 2px rgba(143,184,178,.28); }
 .pill[aria-disabled="true"] { cursor: default; opacity: .85; }
 .group { position: relative; padding: 14px; }
-.group.active { border-color: #9fbbef; box-shadow: 0 0 0 1px rgba(36,95,204,.12); }
+.group.active { border-color: rgba(143,184,178,.4); box-shadow: none; }
 .group-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
 .group-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .group-progress { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; width: 100%; margin: 8px 0 4px; }
-.group-progress progress { flex: 1 1 160px; min-width: 120px; width: 100%; height: 10px; max-height: 10px; appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; background: #edf0f4; overflow: hidden; }
-.group-progress progress::-webkit-progress-bar { background: #edf0f4; border-radius: 999px; }
-.group-progress progress::-webkit-progress-value, .group-progress progress::-moz-progress-bar { background: #245fcc; border-radius: 999px; }
+.group-progress progress { flex: 1 1 160px; min-width: 120px; width: 100%; height: 10px; max-height: 10px; appearance: none; -webkit-appearance: none; border: 0; border-radius: 999px; background: #1c2733; overflow: hidden; }
+.group-progress progress::-webkit-progress-bar { background: #1c2733; border-radius: 999px; }
+.group-progress progress::-webkit-progress-value, .group-progress progress::-moz-progress-bar { background: var(--accent); border-radius: 999px; }
 .group-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
-.group > p { margin: 7px 0; padding-left: 12px; border-left: 3px solid #d9dfe8; }
+.group > p { margin: 7px 0; padding-left: 12px; border-left: 3px solid #2a3948; }
 .identity-anchor { position: relative; display: inline-flex; min-width: 0; }
-.play-toggle[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); color: #184b9f; }
-.popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #fff; box-shadow: 0 12px 32px rgba(24,33,47,.16); }
+.play-toggle[aria-pressed="true"] { border-color: rgba(143,184,178,.28); background: var(--accent-soft); color: #c5d9d4; }
+.popover { position: absolute; top: calc(100% + 8px); left: 0; z-index: 20; width: min(300px, calc(100vw - 24px)); padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: #1b2632; box-shadow: 0 12px 32px rgba(0,0,0,.35); }
 .person-option { display: flex; width: 100%; margin: 0 0 4px; text-align: left; }
-.person-option[aria-pressed="true"] { border-color: #abc3f3; background: var(--accent-soft); }
+.person-option[aria-pressed="true"] { border-color: rgba(143,184,178,.28); background: var(--accent-soft); }
 .popover-footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .popover details { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); }
-#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: rgba(255,255,255,.96); box-shadow: 0 -8px 24px rgba(24,33,47,.06); }
+#player-bar { position: sticky; bottom: 0; display: grid; grid-template-columns: minmax(160px, .7fr) minmax(280px, 1.4fr) auto auto; gap: 14px; align-items: center; min-height: 74px; padding: 10px 20px; padding-bottom: max(10px, env(safe-area-inset-bottom)); padding-left: max(20px, env(safe-area-inset-left)); padding-right: max(20px, env(safe-area-inset-right)); border-top: 1px solid var(--line); background: #0e141b; }
 #now-playing { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
 #player { width: min(520px, 100%); }
 #playback-mode { display: flex; gap: 6px; }
-#help { margin: 0; padding: 7px 20px; color: var(--muted); background: var(--surface); font-size: 11px; text-align: center; }
 details { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--line); }
 summary { cursor: pointer; color: var(--muted); }
 .hidden { display: none; }
@@ -306,7 +320,6 @@ summary { cursor: pointer; color: var(--muted); }
   html, body { overflow-x: hidden; }
   header { gap: 8px; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .header-primary { width: 100%; }
-  h1 { font-size: 16px; }
   button, select, input, summary, .row, .event-toggle, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
   .group-controls { width: 100%; }
   .group-controls button { flex: 1 1 120px; }
@@ -314,9 +327,8 @@ summary { cursor: pointer; color: var(--muted); }
   .group-progress progress { height: 10px; max-height: 10px; }
   #filters { width: 100%; margin: 0; padding: 0; border: 0; }
   #filters > summary { min-height: 44px; font-size: 16px; }
-  #filters .filter-body { flex-direction: column; align-items: stretch; padding-top: 8px; }
-  #filters .filter-body label:first-child { flex-direction: column; align-items: stretch; }
-  #filters .filter-body input[type="search"] { min-width: 0; width: 100%; }
+  #filters .filter-body { flex-direction: row; flex-wrap: nowrap; align-items: center; overflow-x: auto; }
+  #filters .filter-body input[type="search"] { width: 9rem; min-width: 8rem; }
   #status { width: 100%; margin: 0; }
   #library { display: block; height: auto; min-height: 0; }
   aside, #pane, #people-view { overflow: visible; min-width: 0; }
@@ -338,12 +350,12 @@ summary { cursor: pointer; color: var(--muted); }
 }
 @media (min-width: 761px) {
   html, body { height: 100%; overflow: hidden; }
-  header, #player-bar, #help { flex: 0 0 auto; }
+  header, #player-bar { flex: 0 0 auto; }
   main { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
   #library, #people-view { flex: 1 1 auto; min-height: 0; }
   #filters { display: contents; }
   #filters > summary { display: none; }
-  #filters .filter-body { display: contents; }
+  #filters .filter-body { display: flex; flex-wrap: nowrap; }
   #back-recordings { display: none !important; }
 }
 @media (max-width: 320px) {
@@ -527,6 +539,7 @@ JS = r"""
     const requestId = ++dayRequest;
     clearTimeout(reviewTimer);
     reviewTimer = null;
+    status.classList.remove("alert");
     status.textContent = "Loading";
     if (!payload) listMessage("Loading recordings…");
     let response;
@@ -534,12 +547,14 @@ JS = r"""
       response = await fetch("/v1/days/" + day.value, { headers: authHeaders(), cache: "no-store" });
     } catch (error) {
       if (requestId !== dayRequest) return;
+      status.classList.add("alert");
       status.textContent = "Unavailable";
       if (!payload) listMessage("Couldn't load this day. Refresh to try again.");
       return;
     }
     if (requestId !== dayRequest) return;
     if (!response.ok) {
+      status.classList.add("alert");
       status.textContent = "Unavailable";
       if (!payload) listMessage("Couldn't load this day. Refresh to try again.");
       return;
@@ -558,11 +573,9 @@ JS = r"""
     if (payload.pending) issues.push(payload.pending + " pending");
     if (payload.errors) issues.push(payload.errors + " errors");
     const shadow = payload.activity_shadow || {};
-    if (Number(shadow.evaluated) > 0) {
-      issues.push(Number(shadow.would_hold || 0) + "/" + Number(shadow.evaluated) + " shadow-hold");
-      if (Number(shadow.hold_vad_positive) > 0) issues.push(Number(shadow.hold_vad_positive) + " hold/VAD disagreement");
-    }
-    status.textContent = issues.length ? issues.join(" · ") : "Loaded";
+    if (Number(shadow.hold_vad_positive) > 0) issues.push(Number(shadow.hold_vad_positive) + " hold/VAD disagreement");
+    status.textContent = issues.length ? issues.join(" · ") : "";
+    status.classList.toggle("alert", issues.length > 0);
   }
   function setView(next) {
     view = next;
@@ -819,7 +832,14 @@ JS = r"""
             toggle.setAttribute("aria-current", "true");
           }
           const title = document.createElement("div");
-          title.textContent = "Event · " + (block.started_local || "") + " – " + (block.ended_local || "");
+          title.className = "event-title";
+          const startLocal = block.started_local || "";
+          const endLocal = block.ended_local || "";
+          const sameDay = startLocal.slice(0, 10) && startLocal.slice(0, 10) === endLocal.slice(0, 10);
+          const range = sameDay && startLocal.length > 16 && endLocal.length > 16
+            ? startLocal.slice(11, 16) + "–" + endLocal.slice(11)
+            : startLocal + " – " + endLocal;
+          title.textContent = "Event · " + range;
           const meta = document.createElement("div");
           meta.className = "meta";
           const seconds = members.reduce((sum, chunk) => sum + (Number(chunk.duration) || 0), 0);
@@ -1481,6 +1501,11 @@ class ViewerServer(ThreadingHTTPServer):
     allow_reuse_address = True
 
 
+
+def _access_unavailable(handler) -> None:
+    handler._json(503, {"error": "Access verification is unavailable"})
+
+
 class ViewerHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
     server_version = "LifeViewer"
@@ -1531,15 +1556,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
             supplied = self.headers.get("Authorization", "")
             return hmac.compare_digest(supplied.encode(), ("Bearer " + self._token()).encode())
         config = self._remote_config()
-        verifier = getattr(self.server, "access_verifier", None)
-        if not config or verifier is None:
+        if not config or getattr(self.server, "access_verifier", None) is None:
             return False
-        token = self.headers.get("Cf-Access-Jwt-Assertion", "")
-        try:
-            verifier.validate(token)
-            return True
-        except AccessAuthError:
-            return False
+        kind, _client = agent_http.access_outcome(self)
+        if kind == "unavailable":
+            raise VerificationUnavailable("Access verification is unavailable")
+        return kind == "human"
 
     def _headers(self, content_type: str, length: int, extra=None):
         self.send_header("Content-Type", content_type)
@@ -1560,8 +1582,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
         self.close_connection = True
 
-    def _json(self, status: int, payload: dict):
-        self._send(status, json.dumps(payload).encode(), "application/json")
+    def _json(self, status: int, payload: dict, extra=None):
+        self._send(status, json.dumps(payload).encode(), "application/json", extra)
 
     def do_OPTIONS(self):
         self.send_response(403)
@@ -1633,6 +1655,11 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"error": "Forbidden"})
+        try:
+            if agent_http.intercept(self, "HEAD"):
+                return
+        except VerificationUnavailable:
+            return _access_unavailable(self)
         parsed = urlparse(self.path)
         path = parsed.path
         if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
@@ -1673,6 +1700,11 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"error": "Forbidden"})
+        try:
+            if agent_http.intercept(self, "GET"):
+                return
+        except VerificationUnavailable:
+            return _access_unavailable(self)
         parsed = urlparse(self.path)
         path = parsed.path
         if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
@@ -1723,7 +1755,14 @@ class ViewerHandler(BaseHTTPRequestHandler):
         return self._json(404, {"error": "Not found"})
 
     def do_POST(self):
-        if not self._host_ok() or not self._authorized():
+        if not self._host_ok():
+            return self._json(401, {"error": "Unauthorized"})
+        try:
+            if agent_http.intercept(self, "POST"):
+                return
+        except VerificationUnavailable:
+            return _access_unavailable(self)
+        if not self._authorized():
             return self._json(401, {"error": "Unauthorized"})
         origin = self.headers.get("Origin")
         if self._is_remote_host():
@@ -1832,6 +1871,7 @@ def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote
     server.viewer_token = token
     server.remote_access = remote
     server.access_verifier = AccessVerifier(remote) if remote else None
+    server.agent_limiter = agent_http.Limiter()
     inbox.viewer_error = None
     inbox.viewer_server = server
     thread = threading.Thread(target=server.serve_forever, daemon=True)

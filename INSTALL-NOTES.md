@@ -1,16 +1,27 @@
 # Life Recorder Mac receiver install notes
 
-This file is a point-in-time journal. It is not the architecture source of truth. Current behavior is the Architecture section of `README.md`.
+This file is a point-in-time journal. It is not the architecture source of truth. Current behavior is the Architecture section of `README.md`; restart and recovery steps are in `OPERATIONS.md`.
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
-## Current install (2026-09-22)
+## Current install (verified 2026-09-23)
 
 - Data directory: `~/Library/Application Support/LifeRecorder`
 - Upload listener: port 8766. Viewer: `127.0.0.1:8767`
 - Launch agent `com.browseruse.life-recorder.receiver` has `LIFE_RECORDER_REMOTE_SUMMARIES=1`, so event summaries run on this Mac. The code default is off.
 - Agent search is `POST /v1/search` and `POST /v1/events/{id}/read` on `https://lr.genr8ive.ai`. This Mac's launch agent allowlists the Life Recorder Cloudflare Access service token in `LIFE_RECORDER_AGENT_CLIENT_IDS`. Agents read `LIFE_RECORDER_CF_ACCESS_CLIENT_ID` and `LIFE_RECORDER_CF_ACCESS_CLIENT_SECRET` from `secrets.common.env`. Those values are not stored in this repo.
 - Sidebar grouping, speaker badges, and cached summaries are specified in `README.md`.
+
+## 2026-09-23 source and receiver rollout
+
+- Source and project docs committed as `80e8d65` on `codex/local-life-recorder`; no push. Full Python suite: 179 tests passed; staged diff and local Markdown links checked.
+- Before restart, a private consistent SQLite backup, loaded launch plist, and receiver source were saved outside Git. A copy of the schema-v1 database was migrated and reconciled twice: 400 FTS rows, 348 count-only matches for a representative term, 18 live event IDs, cursor key and generation 3 stayed stable; integrity was `ok`.
+- Restarted the existing launch job with `launchctl kickstart -k`, without rerunning setup. New PID 96223 started at 09:53:21 EDT, running this checkout. Upload remains on `*:8766`; the viewer remains on `127.0.0.1:8767`.
+- Authenticated upload `/health` returned 200 with viewer `ok` and Parakeet; unauthenticated returned 401. Live agent-index schema is 2 (not SQLite `user_version`), with 400 keyed transcripts, 400 FTS rows, the same 348 count-only matches, 18 live event IDs, preserved cursor-key fingerprint/generation, and `PRAGMA integrity_check=ok`.
+- Local viewer shell, JavaScript, day list, and a day detail returned 200; an existing retained-audio HEAD returned 200. A remote-host request without a JWT returned 401. The error log had not changed since the previous day when checked after restart.
+- Authorized remote machine search/read and a new iPhone upload were **not** exercised in this rollout; the suite covers route boundaries, but live end-to-end agent and phone delivery remain separate checks. Health showed 3 pending clips at the time of verification.
+
+Entries below are historical setup notes; their then-current states do not supersede the current install or the verified rollout above.
 
 ## 2026-09-19 journal
 

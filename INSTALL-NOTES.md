@@ -4,13 +4,21 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
-## Current install (verified 2026-09-23)
+## Current install (verified 2026-09-24)
 
 - Data directory: `~/Library/Application Support/LifeRecorder`
 - Upload listener: port 8766. Viewer: `127.0.0.1:8767`
 - Launch agent `com.browseruse.life-recorder.receiver` has `LIFE_RECORDER_REMOTE_SUMMARIES=1`, so event summaries run on this Mac. The code default is off.
 - Agent search is `POST /v1/search` and `POST /v1/events/{id}/read` on `https://lr.genr8ive.ai`. This Mac's launch agent allowlists the Life Recorder Cloudflare Access service token in `LIFE_RECORDER_AGENT_CLIENT_IDS`. Agents read `LIFE_RECORDER_CF_ACCESS_CLIENT_ID` and `LIFE_RECORDER_CF_ACCESS_CLIENT_SECRET` from `secrets.common.env`. Those values are not stored in this repo.
 - Sidebar grouping, speaker badges, and cached summaries are specified in `README.md`.
+
+## 2026-09-24 recovery and review rollout
+
+- Committed Mac/iPhone source, tests, and behavior docs as `8e5f460` on `codex/local-life-recorder`; no push. The full Python suite passed 228 tests and `git diff --check` passed. The iPhone simulator app/test target built, and five focused queue-recovery/UI tests passed on an iPhone 17 simulator. Synthetic desktop/mobile browser review flows passed, including speaker confirmation and event editing.
+- Before restart, a private mode-0700 consistent SQLite backup, loaded plist, and receiver source were saved outside Git. Two-pass migration rehearsal and a separate event-edit rehearsal preserved integrity, cursor key, search index, and old event references. The live pre-restart baseline was 863 clips (849 complete, 14 pending), 463 indexed transcripts/FTS rows, 20 active agent event IDs, generation 66, and integrity `ok`.
+- Restarted the **existing** launch job with `launchctl kickstart -k`, without rerunning setup. New PID 49122 listens on `*:8766` and viewer `127.0.0.1:8767`. Authenticated `/health` returned 200 with viewer `ok` and Parakeet; unauthenticated upload health, local viewer API, and remote-host viewer request without JWT returned 401. A day/detail request and retained-audio HEAD succeeded. No live authorized machine-credential probe was available; machine isolation passed focused route tests.
+- The 14 old pending clips had retry times 20–55 minutes in the future. After a focused Opus safety check, each **pending** clip was advanced individually through the authenticated human retry route, beginning with one canary and waiting for its outcome before the next. A private audit compared SHA-256 of all 14 original source files and hashes of all 849 pre-existing completed transcripts after each result. All 14 became complete: one contained recognized words; 13 completed with no words. No original source or pre-existing transcript changed. Final database: 863 complete, zero pending or attention, 464 indexed transcripts/FTS rows, generation 67, integrity `ok`. All 20 pre-existing agent event IDs remain resolvable; active groups are now 21 because processing added a transcript. No audio was manually removed or bulk-retried in attention state.
+- The new iPhone delivery/processing panel and acknowledged-file recovery safeguard are **source-only** on the physical phone. A device build with automatic provisioning still fails because Xcode has no signed-in account or matching development profile for `co.jonbennett.liferecorder`. Do not uninstall the currently working phone app or clear its queue. A new physical-phone upload and this new phone UI remain unverified until signing is restored and an in-place install succeeds. Simulator success is not a substitute.
 
 ## 2026-09-23 source and receiver rollout
 

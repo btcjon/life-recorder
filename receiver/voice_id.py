@@ -554,7 +554,64 @@ def _exemplars(db) -> dict[str, list[list[float]]]:
     return grouped
 
 
-def annotate_turns(db, turns: list[dict]) -> None:
+SUGGESTION_LIMIT = 5
+
+
+def describe_suggestion(clean, exemplars, names) -> dict:
+    """Rank enrolled voiceprints the same way annotate_turns does.
+
+    The result is a suggestion. It is not a stored label.
+    """
+    ranked = []
+    for person_id, samples in exemplars.items():
+        best = max(
+            cosine(json.loads(vector["embedding_json"]), sample)
+            for vector in clean
+            for sample in samples
+        )
+        ranked.append((best, person_id))
+    ranked.sort(reverse=True)
+    score = ranked[0][0]
+    margin = score - ranked[1][0] if len(ranked) > 1 else score
+    reasons = []
+    result = {
+        "score": round(score, 3),
+        "margin": round(margin, 3),
+        "reasons": reasons,
+        "suggestions": [],
+    }
+    if score < SUGGEST_MIN_SCORE - _SCORE_TOLERANCE:
+        reasons.append("score_below_0.60")
+        return result
+    result["suggested_person_id"] = ranked[0][1]
+    result["suggested_name"] = names.get(ranked[0][1])
+    result["basis"] = "ranked"
+    if score < AUTO_MIN_SCORE - _SCORE_TOLERANCE:
+        reasons.append("score_below_0.85")
+    elif margin < AUTO_MIN_MARGIN - _SCORE_TOLERANCE:
+        reasons.append("margin_below_0.10")
+    else:
+        reasons.append("needs_confirmation")
+    visible = [
+        (person_score, person_id)
+        for person_score, person_id in ranked
+        if person_score >= SUGGEST_MIN_SCORE - _SCORE_TOLERANCE
+    ][:SUGGESTION_LIMIT]
+    for index, (person_score, person_id) in enumerate(visible):
+        if index + 1 < len(ranked):
+            person_margin = person_score - ranked[index + 1][0]
+        else:
+            person_margin = person_score
+        result["suggestions"].append({
+            "person_id": person_id,
+            "name": names.get(person_id),
+            "score": round(person_score, 3),
+            "margin": round(person_margin, 3),
+        })
+    return result
+
+
+def annotate_turns(db, turns: list[dict], details: dict | None = None) -> None:
     """Rank suggestions onto turn dicts. This does not write person_id."""
     if not turns:
         return
@@ -603,10 +660,14 @@ def annotate_turns(db, turns: list[dict]) -> None:
         if turn.get("person_id"):
             reasons.append("confirmed")
             turn["suggestion_reasons"] = reasons
+            if details is not None:
+                details[turn["id"]] = {"reasons": list(reasons), "suggestions": []}
             continue
         if track and track["status"] == "frozen":
             reasons.append("track_frozen")
             turn["suggestion_reasons"] = reasons
+            if details is not None:
+                details[turn["id"]] = {"reasons": list(reasons), "suggestions": []}
             continue
         clean = [vector for vector in turn_vectors if not vector["legacy"] and vector["timed"] and not vector["overlap"]]
         if not turn_vectors:
@@ -616,29 +677,19 @@ def annotate_turns(db, turns: list[dict]) -> None:
         elif not exemplars:
             reasons.append("no_enrolled_voiceprints")
         else:
-            ranked = []
-            for person_id, samples in exemplars.items():
-                best = max(cosine(json.loads(vector["embedding_json"]), sample)
-                           for vector in clean for sample in samples)
-                ranked.append((best, person_id))
-            ranked.sort(reverse=True)
-            score = ranked[0][0]
-            margin = score - ranked[1][0] if len(ranked) > 1 else score
-            turn["suggestion_score"] = round(score, 3)
-            turn["suggestion_margin"] = round(margin, 3)
-            if score < SUGGEST_MIN_SCORE - _SCORE_TOLERANCE:
-                reasons.append("score_below_0.60")
-            else:
-                turn["suggested_person_id"] = ranked[0][1]
-                turn["suggested_name"] = names.get(ranked[0][1])
-                turn["suggestion_basis"] = "ranked"
-                if score < AUTO_MIN_SCORE - _SCORE_TOLERANCE:
-                    reasons.append("score_below_0.85")
-                elif margin < AUTO_MIN_MARGIN - _SCORE_TOLERANCE:
-                    reasons.append("margin_below_0.10")
-                else:
-                    reasons.append("needs_confirmation")
+            info = describe_suggestion(clean, exemplars, names)
+            turn["suggestion_score"] = info["score"]
+            turn["suggestion_margin"] = info["margin"]
+            if info.get("basis"):
+                turn["suggested_person_id"] = info["suggested_person_id"]
+                turn["suggested_name"] = info["suggested_name"]
+                turn["suggestion_basis"] = info["basis"]
+            reasons.extend(info["reasons"])
+            if details is not None:
+                details[turn["id"]] = info
         turn["suggestion_reasons"] = reasons
+        if details is not None and turn["id"] not in details:
+            details[turn["id"]] = {"reasons": list(reasons), "suggestions": []}
 
 
 def enrollment_reasons(sample_count: int, clip_count: int, sample_seconds: float, calibrated: bool = False) -> list[str]:
@@ -654,8 +705,13 @@ def enrollment_reasons(sample_count: int, clip_count: int, sample_seconds: float
     return reasons
 
 
-def manual_profiles(db) -> dict[str, dict]:
-    """Accepted samples saved from confirmed manual tags."""
+def manual_profiles(db, exclude_chunk_ids=None) -> dict[str, dict]:
+    """Accepted samples saved from confirmed manual tags.
+
+    exclude_chunk_ids drops every sample from those recordings so a held-out
+    clip cannot support itself.
+    """
+    excluded = {str(chunk_id) for chunk_id in (exclude_chunk_ids or ())}
     grouped: dict[str, dict] = {}
     rows = db.execute(
         """SELECT s.person_id, s.embedding_json, s.duration, t.chunk_id
@@ -665,6 +721,8 @@ def manual_profiles(db) -> dict[str, dict]:
              AND t.label_source='confirmed' AND t.person_id=s.person_id"""
     )
     for row in rows:
+        if row["chunk_id"] in excluded:
+            continue
         vector = normalize_vector(json.loads(row["embedding_json"]))
         if vector is None:
             continue
@@ -733,47 +791,23 @@ def recover_confirmed_samples(db, now: float | None = None) -> int:
     return saved
 
 
-def _stretch_match(db, group, profiles: dict[str, dict]) -> str | None:
-    if not profiles or any(turn["person_id"] for turn in group):
-        return None
+def _match_vectors(db, group):
     turn_ids = [turn["id"] for turn in group]
+    if not turn_ids:
+        return []
     placeholders = ",".join("?" for _ in turn_ids)
-    vectors = list(db.execute(
+    return list(db.execute(
         f"""SELECT * FROM voice_vectors
             WHERE turn_id IN ({placeholders}) AND legacy=0 AND timed=1 AND overlap=0
               AND extraction_version=?""",
         (*turn_ids, EXTRACTION_VERSION),
     ))
-    if not vectors:
+
+
+def _score_vectors(vectors, profiles: dict[str, dict]) -> str | None:
+    """Auto-label score. Requires 0.85, a 0.10 margin, and a ready profile on every vector."""
+    if not vectors or not profiles:
         return None
-    vector_ids = [vector["id"] for vector in vectors]
-    id_placeholders = ",".join("?" for _ in vector_ids)
-    frozen = db.execute(
-        f"""SELECT 1 FROM voice_assignments a
-            JOIN voice_tracks t ON t.id=a.track_id
-            WHERE a.vector_id IN ({id_placeholders}) AND a.active=1 AND a.state='assigned'
-              AND t.status='frozen'""",
-        vector_ids,
-    ).fetchone()
-    if frozen:
-        return None
-    track_ids = [row[0] for row in db.execute(
-        f"""SELECT DISTINCT a.track_id FROM voice_assignments a
-            WHERE a.vector_id IN ({id_placeholders}) AND a.active=1 AND a.state='assigned'
-              AND a.track_id IS NOT NULL""",
-        vector_ids,
-    )]
-    confirmed = set()
-    if track_ids:
-        track_placeholders = ",".join("?" for _ in track_ids)
-        confirmed = {row[0] for row in db.execute(
-            f"""SELECT DISTINCT t.person_id FROM speaker_turns t
-                JOIN voice_vectors v ON v.turn_id=t.id
-                JOIN voice_assignments a ON a.vector_id=v.id AND a.active=1 AND a.state='assigned'
-                WHERE a.track_id IN ({track_placeholders})
-                  AND t.label_source='confirmed' AND t.person_id IS NOT NULL""",
-            track_ids,
-        )}
     winners = set()
     for vector in vectors:
         embedding = normalize_vector(json.loads(vector["embedding_json"]))
@@ -794,12 +828,76 @@ def _stretch_match(db, group, profiles: dict[str, dict]) -> str | None:
             return None
         if not profiles[best_person]["ready"]:
             return None
-        if confirmed and confirmed != {best_person}:
-            return None
         winners.add(best_person)
     if len(winners) != 1:
         return None
     return next(iter(winners))
+
+
+def _track_confirmed(db, vectors) -> set[str]:
+    if not vectors:
+        return set()
+    vector_ids = [vector["id"] for vector in vectors]
+    id_placeholders = ",".join("?" for _ in vector_ids)
+    track_ids = [row[0] for row in db.execute(
+        f"""SELECT DISTINCT a.track_id FROM voice_assignments a
+            WHERE a.vector_id IN ({id_placeholders}) AND a.active=1 AND a.state='assigned'
+              AND a.track_id IS NOT NULL""",
+        vector_ids,
+    )]
+    if not track_ids:
+        return set()
+    track_placeholders = ",".join("?" for _ in track_ids)
+    return {row[0] for row in db.execute(
+        f"""SELECT DISTINCT t.person_id FROM speaker_turns t
+            JOIN voice_vectors v ON v.turn_id=t.id
+            JOIN voice_assignments a ON a.vector_id=v.id AND a.active=1 AND a.state='assigned'
+            WHERE a.track_id IN ({track_placeholders})
+              AND t.label_source='confirmed' AND t.person_id IS NOT NULL""",
+        track_ids,
+    )}
+
+
+def _frozen(db, vectors) -> bool:
+    if not vectors:
+        return False
+    vector_ids = [vector["id"] for vector in vectors]
+    placeholders = ",".join("?" for _ in vector_ids)
+    return db.execute(
+        f"""SELECT 1 FROM voice_assignments a
+            JOIN voice_tracks t ON t.id=a.track_id
+            WHERE a.vector_id IN ({placeholders}) AND a.active=1 AND a.state='assigned'
+              AND t.status='frozen'""",
+        vector_ids,
+    ).fetchone() is not None
+
+
+def score_group(db, group, profiles: dict[str, dict]) -> str | None:
+    """Score a stretch with the auto-label rule.
+
+    Stored names and same-recording confirmations are ignored so held-out
+    evaluation cannot treat the probe clip as evidence. Thresholds stay
+    AUTO_MIN_SCORE and AUTO_MIN_MARGIN. This does not write.
+    """
+    vectors = _match_vectors(db, group)
+    if _frozen(db, vectors):
+        return None
+    return _score_vectors(vectors, profiles)
+
+
+def _stretch_match(db, group, profiles: dict[str, dict]) -> str | None:
+    if not profiles or any(turn["person_id"] for turn in group):
+        return None
+    vectors = _match_vectors(db, group)
+    if not vectors or _frozen(db, vectors):
+        return None
+    confirmed = _track_confirmed(db, vectors)
+    decision = _score_vectors(vectors, profiles)
+    if decision is None:
+        return None
+    if confirmed and confirmed != {decision}:
+        return None
+    return decision
 
 
 def _write_automatic(db, group, person_id: str) -> bool:

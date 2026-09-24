@@ -4,12 +4,37 @@ import Foundation
 import Security
 import UIKit
 
+enum UploadTransportPolicy {
+    static let sessionID = "com.browseruse.liferecorder.uploads"
+    static let allowsCellularAccess = true
+    static let isDiscretionary = false
+    static let sessionSendsLaunchEvents = true
+    static let waitsForConnectivity = true
+    static let requestTimeout: TimeInterval = 120
+    static let resourceTimeout: TimeInterval = 30 * 60
+    static let maximumConnectionsPerHost = 2
+}
+
 final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, URLSessionTaskDelegate {
     static let shared = UploadManager()
-    static let sessionID = "com.browseruse.liferecorder.uploads"
+    static let sessionID = UploadTransportPolicy.sessionID
+    private static let lastErrorKey = "lastUploadError"
+    private static let lastAckKey = "lastAcknowledgedAt"
+    private static let recentReceiptsKey = QueueStore.recentReceiptsKey
+    private static let retryStatus = "Retrying uploads now. Clips stay on this phone until the Mac acknowledges them."
     @Published private(set) var pendingCount = 0
     @Published private(set) var status = "Pair with your Mac to upload"
     @Published private(set) var lastUploadedAt: Date?
+    @Published private(set) var macProcessing: MacProcessingSummary?
+    @Published private(set) var delivery = UploadDeliverySnapshot(
+        phase: .needsPairing,
+        pendingCount: 0,
+        oldestQueuedStartedAt: nil,
+        lastAcknowledgedAt: nil,
+        lastErrorCode: nil,
+        orphanedAcknowledgedCount: 0,
+        unverifiedLocalAudioCount: 0
+    )
     var backgroundCompletion: (() -> Void)?
     private var responseData: [Int: Data] = [:]
     private var retries: [String: Date] = [:]
@@ -18,18 +43,22 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
     private var pumping = false
     private var authenticationRejected = false
     private var timer: Timer?
+    private let statusClient = MacProcessingStatusClient()
+    private var statusInFlight = false
+    private var lastStatusCheck: Date?
+    private var statusGeneration = 0
     private static let staleTaskInterval: TimeInterval = 60
     private lazy var session: URLSession = {
         let config = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
-        config.isDiscretionary = false
-        config.sessionSendsLaunchEvents = true
-        config.allowsCellularAccess = true
-        config.waitsForConnectivity = true
-        config.timeoutIntervalForRequest = 120
+        config.isDiscretionary = UploadTransportPolicy.isDiscretionary
+        config.sessionSendsLaunchEvents = UploadTransportPolicy.sessionSendsLaunchEvents
+        config.allowsCellularAccess = UploadTransportPolicy.allowsCellularAccess
+        config.waitsForConnectivity = UploadTransportPolicy.waitsForConnectivity
+        config.timeoutIntervalForRequest = UploadTransportPolicy.requestTimeout
         // A connectivity-waiting task must not occupy one of the two upload
         // slots for days if the LAN route or hostname becomes stale.
-        config.timeoutIntervalForResource = 30 * 60
-        config.httpMaximumConnectionsPerHost = 2
+        config.timeoutIntervalForResource = UploadTransportPolicy.resourceTimeout
+        config.httpMaximumConnectionsPerHost = UploadTransportPolicy.maximumConnectionsPerHost
         config.tlsMinimumSupportedProtocolVersion = .TLSv12
         config.tlsMaximumSupportedProtocolVersion = .TLSv13
         return URLSession(configuration: config, delegate: self, delegateQueue: .main)
@@ -37,20 +66,29 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
 
     private override init() {
         super.init()
+        lastUploadedAt = UserDefaults.standard.object(forKey: Self.lastAckKey) as? Date
+        refreshDelivery(transferInFlight: false, hasRetryBackoff: false)
     }
 
     func activate() {
         _ = session // Reattach transfers if iOS launched us to deliver an upload result.
         if timer == nil {
-            timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in self?.pump() }
+            timer = Timer.scheduledTimer(withTimeInterval: 15, repeats: true) { [weak self] _ in
+                self?.pump()
+                self?.refreshMacProcessingIfDue()
+            }
         }
         pump()
+        refreshMacProcessingIfDue()
     }
 
     func configurationChanged() {
         authenticationRejected = false
         retries.removeAll()
         failureCounts.removeAll()
+        statusGeneration += 1
+        macProcessing = nil
+        lastStatusCheck = nil
         retryNow()
     }
 
@@ -58,7 +96,7 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
         authenticationRejected = false
         retries.removeAll()
         failureCounts.removeAll()
-        status = "Retrying uploads now"
+        refreshDelivery(transferInFlight: true, hasRetryBackoff: false, statusOverride: Self.retryStatus)
         session.getAllTasks { tasks in
             DispatchQueue.main.async {
                 for task in tasks {
@@ -76,8 +114,14 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
         assert(Thread.isMainThread)
         let pending = QueueStore.pending()
         pendingCount = pending.count
-        guard let settings = ReceiverSettings.load() else { status = "Pair with your Mac to upload"; return }
-        guard !authenticationRejected else { return }
+        guard let settings = ReceiverSettings.load() else {
+            refreshDelivery(transferInFlight: false, hasRetryBackoff: false)
+            return
+        }
+        guard !authenticationRejected else {
+            refreshDelivery(transferInFlight: false, hasRetryBackoff: false)
+            return
+        }
         guard !pumping else { return }
         pumping = true
         session.getAllTasks { [weak self] tasks in
@@ -104,11 +148,14 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                     active.insert(id)
                 }
                 var available = max(0, 2 - active.count)
+                let slotsBefore = available
                 for chunk in pending where !active.contains(chunk.name) {
                     guard available > 0 else { break }
                     if let retry = self.retries[chunk.name], retry > Date() { continue }
                     guard FileManager.default.fileExists(atPath: chunk.audioURL.path) else {
-                        self.status = "A pending audio file is missing; its record has been retained"
+                        if UserDefaults.standard.string(forKey: Self.lastErrorKey)?.hasPrefix("HTTP:") != true {
+                            UserDefaults.standard.set("local:missing-audio", forKey: Self.lastErrorKey)
+                        }
                         continue
                     }
                     let url = settings.baseURL.appendingPathComponent("v1/chunks").appendingPathComponent(chunk.name)
@@ -133,9 +180,85 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                     task.resume()
                     available -= 1
                 }
-                if pending.isEmpty { self.status = "All completed audio uploaded" }
-                else if active.isEmpty && available == 2 { /* Keep the latest actionable error. */ }
-                else { self.status = "Uploading when connected" }
+                let started = slotsBefore - available
+                let pendingNames = Set(pending.map(\.name))
+                // A task for a clip already removed must not look like an upload still in progress.
+                let transferInFlight = started > 0 || !active.intersection(pendingNames).isEmpty
+                let hasRetryBackoff = pending.contains { chunk in
+                    self.retries[chunk.name].map { $0 > Date() } ?? false
+                }
+                self.refreshDelivery(transferInFlight: transferInFlight, hasRetryBackoff: hasRetryBackoff)
+            }
+        }
+    }
+
+    private func refreshDelivery(transferInFlight: Bool, hasRetryBackoff: Bool, statusOverride: String? = nil) {
+        let pending = QueueStore.pending()
+        pendingCount = pending.count
+        let oldest = pending.min { $0.startedAt < $1.startedAt }?.startedAt
+        let lastErrorCode = UserDefaults.standard.string(forKey: Self.lastErrorKey)
+        if lastUploadedAt == nil {
+            lastUploadedAt = UserDefaults.standard.object(forKey: Self.lastAckKey) as? Date
+        }
+        let orphans = QueueStore.orphanedAcknowledgedAudioCount()
+        let phase = UploadDeliverySnapshot.resolvePhase(
+            paired: ReceiverSettings.load() != nil,
+            pendingCount: pending.count,
+            transferInFlight: transferInFlight,
+            authenticationRejected: authenticationRejected,
+            hasRetryBackoff: hasRetryBackoff,
+            hasLastError: lastErrorCode != nil,
+            hasAcknowledgement: lastUploadedAt != nil,
+            orphanedAcknowledgedCount: orphans
+        )
+        let snapshot = UploadDeliverySnapshot(
+            phase: phase,
+            pendingCount: pending.count,
+            oldestQueuedStartedAt: oldest,
+            lastAcknowledgedAt: lastUploadedAt,
+            lastErrorCode: lastErrorCode,
+            orphanedAcknowledgedCount: orphans,
+            unverifiedLocalAudioCount: QueueStore.unverifiedLocalAudioCount()
+        )
+        delivery = snapshot
+        if let statusOverride, phase == .uploading {
+            status = statusOverride
+        } else {
+            status = UploadDeliveryCopy.statusLine(for: snapshot)
+        }
+    }
+
+    private func rememberReceipt(_ id: String) {
+        let prior = UserDefaults.standard.stringArray(forKey: Self.recentReceiptsKey) ?? []
+        let recent = [id] + prior.filter { $0 != id }
+        UserDefaults.standard.set(Array(recent.prefix(10)), forKey: Self.recentReceiptsKey)
+        lastStatusCheck = nil
+    }
+
+    private func refreshMacProcessingIfDue() {
+        assert(Thread.isMainThread)
+        guard UIApplication.shared.applicationState == .active, !statusInFlight,
+              let settings = ReceiverSettings.load() else { return }
+        let ids = (UserDefaults.standard.stringArray(forKey: Self.recentReceiptsKey) ?? [])
+            .filter { UUID(uuidString: $0) != nil }
+            .prefix(10)
+        guard !ids.isEmpty else { return }
+        let now = Date()
+        if let lastStatusCheck, now.timeIntervalSince(lastStatusCheck) < 60 { return }
+        lastStatusCheck = now
+        statusInFlight = true
+        let generation = statusGeneration
+        statusClient.fetch(ids: Array(ids), settings: settings, deviceID: QueueStore.deviceID) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.statusInFlight = false
+                guard generation == self.statusGeneration else { return }
+                switch result {
+                case .success(let records):
+                    self.macProcessing = MacProcessingSummary(records: records, checkedAt: Date())
+                case .failure:
+                    self.macProcessing = nil
+                }
             }
         }
     }
@@ -174,43 +297,45 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
         let data = responseData.removeValue(forKey: task.taskIdentifier) ?? Data()
         guard let id = Self.taskID(task.taskDescription),
               let chunk = QueueStore.pending().first(where: { $0.name == id }) else { pump(); return }
+        // Storage receipt only. Ignore any extra processing fields on this response.
         struct Receipt: Decodable { let id: String; let sha256: String; let durable: Bool }
         let response = task.response as? HTTPURLResponse
         if immediateRetryTaskIDs.remove(task.taskIdentifier) != nil {
             retries.removeValue(forKey: id)
             failureCounts.removeValue(forKey: id)
-            status = "Retrying uploads now"
+            refreshDelivery(transferInFlight: true, hasRetryBackoff: false, statusOverride: Self.retryStatus)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { self.pump() }
             return
         }
         if error == nil, let response, [200, 201].contains(response.statusCode),
            let receipt = try? JSONDecoder().decode(Receipt.self, from: data),
            receipt.durable, receipt.id == id, receipt.sha256 == chunk.sha256 {
+            rememberReceipt(id)
             do {
                 try QueueStore.removeAcknowledged(chunk)
                 retries.removeValue(forKey: id)
                 failureCounts.removeValue(forKey: id)
-                UserDefaults.standard.removeObject(forKey: "lastUploadError")
+                UserDefaults.standard.removeObject(forKey: Self.lastErrorKey)
                 lastUploadedAt = Date()
-                status = "Uploaded safely; local copy removed"
-            } catch { status = "Uploaded; local cleanup will retry on reopening" }
+                UserDefaults.standard.set(lastUploadedAt, forKey: Self.lastAckKey)
+                refreshDelivery(transferInFlight: false, hasRetryBackoff: false)
+            } catch {
+                refreshDelivery(transferInFlight: false, hasRetryBackoff: false)
+            }
+            refreshMacProcessingIfDue()
         } else {
             if let error = error as NSError? {
-                UserDefaults.standard.set("\(error.domain):\(error.code)", forKey: "lastUploadError")
+                UserDefaults.standard.set("\(error.domain):\(error.code)", forKey: Self.lastErrorKey)
             } else if let response {
-                UserDefaults.standard.set("HTTP:\(response.statusCode)", forKey: "lastUploadError")
+                UserDefaults.standard.set("HTTP:\(response.statusCode)", forKey: Self.lastErrorKey)
             }
             let failures = (failureCounts[id] ?? 0) + 1
             failureCounts[id] = failures
             retries[id] = Date().addingTimeInterval(min(1800, 15 * pow(2, Double(min(failures, 7)))))
-            switch response?.statusCode {
-            case 401:
+            if response?.statusCode == 401 {
                 authenticationRejected = true
-                status = "Pairing token rejected. Audio remains on this phone."
-            case 409: status = "Receiver reported a chunk conflict. Audio remains on this phone."
-            case 507: status = "Mac storage is full. Audio remains on this phone."
-            default: status = "Waiting to upload. Audio remains on this phone."
             }
+            refreshDelivery(transferInFlight: false, hasRetryBackoff: true)
         }
         pump()
     }

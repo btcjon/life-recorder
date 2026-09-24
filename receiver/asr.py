@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import subprocess
 
 import decoded_audio
@@ -16,6 +17,69 @@ DEFAULT_PARAKEET_CLI = (
 DEFAULT_PARAKEET_MODEL_DIR = Path.home() / (
     "Library/Application Support/FluidAudio/Models/parakeet-tdt-0.6b-v3"
 )
+
+# Exact parser messages. Anything else raised as ValueError stays retryable.
+_MALFORMED_MESSAGES = {
+    "Malformed Parakeet output": "asr_malformed_output",
+    "Missing Parakeet output": "asr_missing_output",
+    "Unexpected MLX output": "asr_unexpected_output",
+    "Unexpected Whisper output": "asr_unexpected_output",
+}
+_PERMANENT_MESSAGES = {
+    "ffmpeg is required": "engine_unavailable",
+    "Unsupported engine": "engine_unavailable",
+    "MLX engine requires command and model": "engine_unavailable",
+    "Whisper engine requires model and whisper-cli": "engine_unavailable",
+}
+
+
+class ProcessingFailure(Exception):
+    """Sanitized processing failure. The message is the stable code, never tool output."""
+
+    def __init__(self, stage: str, code: str, kind: str):
+        super().__init__(code)
+        self.stage = stage
+        self.code = code
+        self.kind = kind
+
+
+def classify_processing_failure(error: BaseException) -> tuple[str, str, str]:
+    """Return stage, safe code, and kind: transient, malformed, or permanent.
+
+    ValueError is permanent only for a missing local engine. Malformed model
+    output and every other ValueError stay retryable.
+    """
+    if isinstance(error, ProcessingFailure):
+        return error.stage, error.code, error.kind
+    if isinstance(error, subprocess.TimeoutExpired):
+        return "asr", "asr_timeout", "transient"
+    if isinstance(error, subprocess.CalledProcessError):
+        return "asr", "asr_failed", "transient"
+    if isinstance(error, FileNotFoundError):
+        return "decode", "source_missing", "permanent"
+    if isinstance(error, TimeoutError):
+        return "asr", "asr_timeout", "transient"
+    if isinstance(error, sqlite3.OperationalError):
+        return "commit", "storage_busy", "transient"
+    if isinstance(error, OSError):
+        return "decode", "decode_failed", "transient"
+    if isinstance(error, json.JSONDecodeError):
+        return "asr", "asr_malformed_output", "malformed"
+    if isinstance(error, ValueError):
+        message = str(error)
+        if message in _PERMANENT_MESSAGES:
+            return "asr", _PERMANENT_MESSAGES[message], "permanent"
+        if message in _MALFORMED_MESSAGES:
+            return "asr", _MALFORMED_MESSAGES[message], "malformed"
+        return "processing", "processing_failed", "transient"
+    return "processing", "processing_failed", "transient"
+
+
+def _wav_usable(path: Path) -> bool:
+    try:
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
 
 
 @dataclass(frozen=True)
@@ -123,9 +187,14 @@ def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tu
     engine = config.engine
     lease = None
     try:
-        lease = decoded_audio.acquire(
-            config.ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run,
-        )
+        try:
+            lease = decoded_audio.acquire(
+                config.ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run,
+            )
+        except decoded_audio.EmptyDecodeError as error:
+            raise ProcessingFailure("decode", "decode_empty", "transient") from error
+        if not _wav_usable(lease.path):
+            raise ProcessingFailure("decode", "decode_empty", "transient")
         wav = lease.path
         if engine == "parakeet":
             cli = config.parakeet_cli or DEFAULT_PARAKEET_CLI

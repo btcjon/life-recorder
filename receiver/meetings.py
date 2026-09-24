@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 
 import agent_api
+import event_edits
 import event_summaries
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
@@ -96,6 +97,9 @@ def migrate_schema(db) -> None:
         "activity_peak_dbfs": "REAL",
         "activity_reason": "TEXT",
         "voice_extract_version": "INTEGER NOT NULL DEFAULT 0",
+        "error_code": "TEXT",
+        "error_stage": "TEXT",
+        "attention_at": "REAL",
     }
     for name, declaration in additions.items():
         if name not in cols:
@@ -241,7 +245,16 @@ def migrate_schema(db) -> None:
     db.execute(
         "INSERT OR IGNORE INTO voice_maintenance (id, recover_complete, startup_sweep_complete) VALUES (1, 0, 0)"
     )
+    db.execute(
+        """CREATE TABLE IF NOT EXISTS speaker_suggestion_rejections (
+            turn_id TEXT NOT NULL,
+            person_id TEXT NOT NULL,
+            created_at REAL NOT NULL,
+            PRIMARY KEY (turn_id, person_id)
+        )"""
+    )
     event_summaries.ensure_schema(db)
+    event_edits.ensure_schema(db)
     agent_api.ensure_schema(db)
     _purge_legacy_voice_embeddings(db)
     if version < SCHEMA_VERSION:

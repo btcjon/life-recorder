@@ -81,10 +81,13 @@ class VadParseTests(unittest.TestCase):
             write_tone(audio, 0.5)
             row = {"id": "c1", "path": str(audio), "duration": 0.5}
             with mock.patch.object(vad_mod.subprocess, "run") as run:
-                run.side_effect = [
-                    mock.Mock(returncode=0),
-                    mock.Mock(returncode=1, stderr=b"fail"),
-                ]
+                def decode_then_fail(argv, **kwargs):
+                    if argv[0] == "ffmpeg":
+                        Path(argv[-1]).write_bytes(b"RIFF")
+                        return mock.Mock(returncode=0)
+                    return mock.Mock(returncode=1, stderr=b"fail")
+
+                run.side_effect = decode_then_fail
                 with self.assertRaises(vad_mod.VadError):
                     vad_mod.process_chunk(row, Path("/bin/false"), "ffmpeg", Path(scratch))
 

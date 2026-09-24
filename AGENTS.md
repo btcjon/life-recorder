@@ -7,6 +7,7 @@ Life Recorder is a private iPhone recorder plus a Mac receiver/viewer. Read this
 - `ios/`: native capture, quiet hours, local queue, and pinned HTTPS upload.
 - `receiver/receiver.py`: upload service, private SQLite ledger, processing, and retention.
 - `receiver/viewer.py`: loopback viewer, event presentation, and human routes.
+- `receiver/event_edits.py`, `speaker_review.py`: revisioned human event boundaries and read-only uncertain-speaker review.
 - `receiver/agent_api/`: restricted, read-only machine search and event reads.
 - `receiver/asr.py`, `voice_id.py`, `event_summaries.py`: local speech processing, speaker identity, and optional summaries.
 - `tests/`: unit and browser probes. `scripts/`: narrowly scoped build/processing aids.
@@ -17,6 +18,7 @@ Life Recorder is a private iPhone recorder plus a Mac receiver/viewer. Read this
 - Keep recordings, transcripts, SQLite databases, pairing pages, certificates, tokens, service credentials, device IDs, model files, and generated media outside Git. Do not print their contents in logs or handoffs.
 - Do not confuse the three boundaries: the iPhone uploads to authenticated HTTPS port 8766; the viewer binds to `127.0.0.1:8767`; optional remote access reaches only the viewer through Cloudflare Access. Machine credentials may search/read text, not audio or human/mutation routes.
 - Speaker labels are evidence-sensitive. Keep unconfirmed matches distinct from human-confirmed names; do not turn automatic matches into enrollment samples.
+- A human label does not enroll a reusable voice sample unless `use_sample` is explicitly true; keep that opt-in and the conservative auto-match thresholds intact.
 - Event groups, speech-event playback spans, and Markdown capture sessions are different concepts. See README before changing their thresholds.
 - The original audio remains the recognition source; enhanced audio is a disposable playback derivative. Remote event summaries may send transcript text to Grok only when explicitly enabled.
 

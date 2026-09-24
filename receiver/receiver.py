@@ -22,7 +22,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import asr as asr_mod
 import detector as detector_mod
@@ -31,6 +31,7 @@ import viewer as viewer_mod
 import decoded_audio
 import agent_api
 import event_summaries
+import event_edits
 import diarization as diarization_mod
 import vad as vad_mod
 import voice_id
@@ -41,6 +42,8 @@ DISPLAY_ZONE = ZoneInfo("America/New_York")
 RETENTION_SECONDS = 7 * 24 * 60 * 60
 MAX_RETENTION_SECONDS = 14 * 24 * 60 * 60
 MAX_RETAINED_BYTES = 4 * 1024 * 1024 * 1024
+MAX_PROCESSING_ATTEMPTS = 5
+PROCESSING_STATUSES = ("pending", "complete", "needs_attention")
 
 
 def atomic_write(path: Path, data: bytes):
@@ -170,7 +173,7 @@ class Inbox:
                 attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
                 error TEXT, received REAL NOT NULL)""")
             meetings_mod.migrate_schema(db)
-            agent_api.reconcile(db, viewer_mod.display_blocks)
+            agent_api.reconcile(db, self._blocks_for(db))
         # Recover a crash after a transcript transaction but before Markdown refresh.
         self.export()
         self.cleanup_completed()
@@ -245,6 +248,7 @@ class Inbox:
                 audio_bytes = Path(path_row["path"]).stat().st_size if path_row and Path(path_row["path"]).is_file() else 0
                 db.execute(
                     """UPDATE chunks SET status='complete', transcript=?, error=NULL,
+                       error_code=NULL, error_stage=NULL, attention_at=NULL,
                        engine=?, asr_model=?, asr_summary=?, word_count=?, speech_density=?,
                        completed_at=?, audio_state='present', audio_bytes=?, audio_expires_at=?,
                        words_json=?, diarization_status='pending', vad_status='pending'
@@ -253,7 +257,7 @@ class Inbox:
                      json.dumps(summary), word_count, density, now, audio_bytes,
                      now + RETENTION_SECONDS, json.dumps(words or []), chunk_id),
                 )
-                agent_api.reconcile(db, viewer_mod.display_blocks, {chunk_id})
+                agent_api.reconcile(db, self._blocks_for(db), {chunk_id})
             self.export()
             # Keep completed audio for playback and speaker enrichment, within bounded limits.
             self.cleanup_completed()
@@ -471,12 +475,87 @@ class Inbox:
             return {row["status"]: row["n"] for row in db.execute(
                 "SELECT status,count(*) AS n FROM chunks GROUP BY status")}
 
+    def processing_record(self, chunk_id: str, device_id: str | None = None):
+        """Safe processing view. No transcript, path, device, or checksum."""
+        if device_id is None:
+            row = self.receipt(chunk_id)
+        else:
+            with self.connect() as db:
+                row = db.execute(
+                    "SELECT * FROM chunks WHERE id=? AND device=?", (chunk_id, device_id)
+                ).fetchone()
+        if row is None:
+            return None
+        status = row["status"]
+        if status == "complete":
+            eligible, mode = False, "none"
+        elif status == "needs_attention":
+            eligible = Path(row["path"]).is_file()
+            mode = "manual" if eligible else "none"
+        elif status == "pending":
+            eligible, mode = True, "automatic"
+        else:
+            eligible, mode = False, "none"
+        return {
+            "id": row["id"],
+            "status": status,
+            "received_at": row["received"],
+            "retry_at": row["retry_at"],
+            "completed_at": row["completed_at"],
+            "attention_at": row["attention_at"],
+            "attempts": int(row["attempts"] or 0),
+            "error_code": row["error_code"],
+            "error_stage": row["error_stage"],
+            "retry_eligible": eligible,
+            "retry_mode": mode,
+        }
+
+    def retry_chunk(self, chunk_id: str):
+        """Requeue one chunk without deleting audio or rewriting a finished transcript.
+
+        ``needs_attention`` starts a fresh attempt budget. ``pending`` only clears
+        the backoff. ``complete`` is unchanged so a restart cannot duplicate it.
+        """
+        with self.lock:
+            with self.connect() as db:
+                row = db.execute("SELECT status, attempts, path FROM chunks WHERE id=?", (chunk_id,)).fetchone()
+                if row is None:
+                    return None
+                if row["status"] == "complete":
+                    pass
+                elif not Path(row["path"]).is_file():
+                    pass
+                else:
+                    attempts = 0 if row["status"] == "needs_attention" else int(row["attempts"] or 0)
+                    db.execute(
+                        """UPDATE chunks SET status='pending', attempts=?, retry_at=0,
+                           error=NULL, error_code=NULL, error_stage=NULL, attention_at=NULL
+                           WHERE id=? AND status!='complete'""",
+                        (attempts, chunk_id),
+                    )
+        return self.processing_record(chunk_id)
+
     def list_chunks(self):
         """Recording rows for the day list, without transcripts' word timings."""
         with self.connect() as db:
             return db.execute("""SELECT id,device,started,duration,path,status,error,transcript,
                 word_count,engine,audio_state,audio_expires_at,audio_pinned,diarization_status,
+                error_code,error_stage,
                 activity_decision,vad_status FROM chunks ORDER BY started,id""").fetchall()
+
+    def _blocks_for(self, db):
+        def blocks(chunks):
+            return event_edits.overlay(chunks, event_edits.load(db))
+        return blocks
+
+    def save_event_edit(self, body: dict) -> dict:
+        with self.lock, self.connect() as db:
+            rows = db.execute(
+                "SELECT id, started, duration, transcript FROM chunks"
+            ).fetchall()
+            saved = event_edits.save(db, body, rows)
+            agent_api.reconcile(db, self._blocks_for(db))
+            return saved
 
     def viewer_days(self) -> list[str]:
         days = set()
@@ -527,6 +606,8 @@ class Inbox:
                 "transcript": row["transcript"] or "",
                 "word_count": row["word_count"],
                 "status": row["status"],
+                "error_code": row["error_code"],
+                "error_stage": row["error_stage"],
                 "engine": row["engine"],
                 "audio_playable": row["audio_state"] == "present" and Path(row["path"]).is_file(),
                 "audio_expires_at": row["audio_expires_at"],
@@ -593,11 +674,12 @@ class Inbox:
                 "reasons": json.loads(row["reasons"] or "[]"),
                 "speakers": None,
             })
-        display_blocks = viewer_mod.display_blocks(chunks)
         with self.connect() as db:
+            display_blocks = event_edits.overlay(chunks, event_edits.load(db))
             display_blocks = event_summaries.decorate(
                 db, display_blocks, {chunk["id"]: chunk for chunk in chunks},
             )
+            display_blocks = event_edits.confirmed_speakers(display_blocks)
         return {
             "day": day,
             "sessions": sessions,
@@ -780,7 +862,8 @@ class Inbox:
         return {"id": person_id, "name": name} if result.rowcount else None
 
     def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
-        del use_sample
+        """Confirm a human label. Enroll a sample only when the caller opts in."""
+        use_sample = use_sample is True
         with self.connect() as db:
             person = db.execute("SELECT id FROM people WHERE id=?", (person_id,)).fetchone()
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
@@ -803,14 +886,18 @@ class Inbox:
             }
             db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
                 WHERE id IN ({placeholders})""", (person_id, *turn_ids))
-            changed = any(before.get(turn_id) != (person_id, "confirmed") for turn_id in turn_ids)
-            db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
-            voice_id.clear_enrollment(db, turn_ids)
-            enrolled = voice_id.enroll_turns(db, matching, person_id)
+            changed = any(before.get(candidate_id) != (person_id, "confirmed") for candidate_id in turn_ids)
+            person_changed = any(before.get(candidate_id, (None, None))[0] != person_id for candidate_id in turn_ids)
+            enrolled = {"enrolled": False}
+            if use_sample or person_changed:
+                db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
+                voice_id.clear_enrollment(db, turn_ids)
+            if use_sample:
+                enrolled = voice_id.enroll_turns(db, matching, person_id)
             voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
             if enrolled.get("enrolled"):
                 voice_id.enqueue_unlabeled(db, "sample")
-            agent_api.reconcile(db, viewer_mod.display_blocks, {turn["chunk_id"]})
+            agent_api.reconcile(db, self._blocks_for(db), {turn["chunk_id"]})
             if changed:
                 agent_api.note_speaker_change(db, [turn["chunk_id"]])
         return True
@@ -852,6 +939,8 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.authorized():
             return self.respond(401, {"error": "Unauthorized"})
+        if self.path.startswith("/v1/chunks/status?"):
+            return self.handle_processing_status()
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         payload = {"ok": True, "chunks": self.inbox.status()}
@@ -863,6 +952,31 @@ class Handler(BaseHTTPRequestHandler):
         elif self.inbox.viewer_server:
             payload["viewer"] = "ok"
         self.respond(200, payload)
+
+    def handle_processing_status(self):
+        """Bounded, device-scoped status for clips this phone already uploaded."""
+        try:
+            parsed = urlparse(self.path)
+            if parsed.path != "/v1/chunks/status" or len(parsed.query) > 800:
+                raise ValueError("Invalid status query")
+            params = parse_qs(parsed.query, keep_blank_values=True, strict_parsing=True)
+            if set(params) != {"ids"} or len(params["ids"]) != 1:
+                raise ValueError("Invalid status query")
+            raw_ids = params["ids"][0].split(",")
+            if not 1 <= len(raw_ids) <= 10:
+                raise ValueError("Invalid status count")
+            ids = [valid_uuid(value) for value in raw_ids]
+            if len(set(ids)) != len(ids):
+                raise ValueError("Duplicate status id")
+            device_id = valid_uuid(self.headers.get("X-Device-ID", ""))
+        except (ValueError, TypeError):
+            return self.respond(400, {"error": "Invalid status request"})
+        records = [
+            self.inbox.processing_record(chunk_id, device_id)
+            or {"id": chunk_id, "status": "unknown"}
+            for chunk_id in ids
+        ]
+        return self.respond(200, {"chunks": records})
 
     def handle_meeting_event(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -979,6 +1093,25 @@ def clean_transcript(text: str) -> str:
     return " ".join(words)
 
 
+def record_processing_failure(inbox: Inbox, row, error: BaseException) -> None:
+    """Count one failed attempt. Stop automatic retries at the budget or a permanent code."""
+    stage, code, kind = asr_mod.classify_processing_failure(error)
+    attempts = int(row["attempts"] or 0) + 1
+    now = time.time()
+    if kind == "permanent" or attempts >= MAX_PROCESSING_ATTEMPTS:
+        status, retry_at, attention_at = "needs_attention", 0, now
+    else:
+        delay = min(3600, 15 * 2 ** min(attempts, 8))
+        status, retry_at, attention_at = "pending", now + delay, None
+    with inbox.connect() as db:
+        db.execute(
+            """UPDATE chunks SET status=?, attempts=?, retry_at=?, error=?,
+               error_code=?, error_stage=?, attention_at=?
+               WHERE id=? AND status='pending'""",
+            (status, attempts, retry_at, code, code, stage, attention_at, row["id"]),
+        )
+
+
 def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpeg: str,
            mlx_command: str | None = None, mlx_model: str | None = None,
            config: asr_mod.AsrConfig | None = None):
@@ -1007,12 +1140,8 @@ def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpe
             inbox.complete(row["id"], text, provenance)
             diarization_mod.refresh_decoded_pins(inbox)
         except Exception as error:
-            # Keep the audio and retry. Error type only; external-tool output is private.
-            attempts = row["attempts"] + 1
-            with inbox.connect() as db:
-                db.execute("UPDATE chunks SET attempts=?,retry_at=?,error=? WHERE id=?",
-                           (attempts, time.time() + min(3600, 15 * 2 ** min(attempts, 8)),
-                            type(error).__name__, row["id"]))
+            # Keep the audio. Store a safe code, never tool output or a transcript.
+            record_processing_failure(inbox, row, error)
 
 
 def main():

@@ -107,7 +107,7 @@ class VoiceIdentityTests(unittest.TestCase):
             turn_id = db.execute(
                 "SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk_id,),
             ).fetchone()[0]
-        self.assertTrue(inbox.label_turn(turn_id, person_id))
+        self.assertTrue(inbox.label_turn(turn_id, person_id, use_sample=True))
         return chunk_id, turn_id
 
     def _open_clip(self, inbox, embedding, started, turns=None):
@@ -167,8 +167,8 @@ class VoiceIdentityTests(unittest.TestCase):
                     "SELECT id FROM speaker_turns WHERE chunk_id=? AND speaker_key='S1' ORDER BY started",
                     (same,),
                 )]
-            self.assertTrue(inbox.label_turn(ids[0], jon["id"]))
-            self.assertTrue(inbox.label_turn(ids[1], jon["id"]))
+            self.assertTrue(inbox.label_turn(ids[0], jon["id"], use_sample=True))
+            self.assertTrue(inbox.label_turn(ids[1], jon["id"], use_sample=True))
             person = next(row for row in inbox.people() if row["name"] == "Jon")
             self.assertEqual(person["sample_count"], 2)
             self.assertEqual(person["clip_count"], 1)
@@ -179,7 +179,7 @@ class VoiceIdentityTests(unittest.TestCase):
             ])
             with inbox.connect() as db:
                 short_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (short,)).fetchone()[0]
-            self.assertTrue(inbox.label_turn(short_id, jon["id"]))
+            self.assertTrue(inbox.label_turn(short_id, jon["id"], use_sample=True))
             with inbox.connect() as db:
                 self.assertEqual(db.execute(
                     "SELECT count(*) FROM voice_samples WHERE turn_id=?", (short_id,),
@@ -189,7 +189,7 @@ class VoiceIdentityTests(unittest.TestCase):
             ])
             with inbox.connect() as db:
                 five_id = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (five,)).fetchone()[0]
-            self.assertTrue(inbox.label_turn(five_id, jon["id"]))
+            self.assertTrue(inbox.label_turn(five_id, jon["id"], use_sample=True))
             with inbox.connect() as db:
                 sample = db.execute(
                     "SELECT duration FROM voice_samples WHERE turn_id=?", (five_id,),

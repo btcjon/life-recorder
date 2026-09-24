@@ -55,6 +55,7 @@ struct RecordingJournal: Codable {
 }
 
 enum QueueStore {
+    static let recentReceiptsKey = "recentUploadReceiptIDs"
     static let directory: URL = {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         let url = support.appendingPathComponent("PendingAudio", isDirectory: true)
@@ -115,23 +116,82 @@ enum QueueStore {
                 unrecoverable += 1
             }
         }
-        // Removal of an acknowledged manifest is the local commit point. Finish cleanup after a crash.
+        // An .acked marker is the local commit point for a verified Mac receipt.
+        // Older builds may have removed the manifest before writing such a marker;
+        // only a retained verified receipt ID can establish that older case.
         for audio in files where audio.pathExtension == "m4a" {
             let stem = audio.deletingPathExtension().lastPathComponent
-            if !FileManager.default.fileExists(atPath: directory.appendingPathComponent(stem + ".json").path)
-                && !FileManager.default.fileExists(atPath: directory.appendingPathComponent(stem + ".recording.json").path) {
-                try? FileManager.default.removeItem(at: audio)
+            guard !hasValidManifest(stem), !hasJournal(stem) else { continue }
+            guard isVerifiedAcknowledged(stem) else { continue }
+            try? FileManager.default.removeItem(at: audio)
+            if !FileManager.default.fileExists(atPath: audio.path) {
+                try? FileManager.default.removeItem(at: acknowledgedMarker(stem))
+            }
+        }
+        for marker in files where marker.pathExtension == "acked" {
+            let stem = marker.deletingPathExtension().lastPathComponent
+            let audio = directory.appendingPathComponent(stem + ".m4a")
+            if !FileManager.default.fileExists(atPath: audio.path) {
+                try? FileManager.default.removeItem(at: marker)
             }
         }
         return unrecoverable
     }
 
+    private static func acknowledgedMarker(_ stem: String) -> URL {
+        directory.appendingPathComponent(stem + ".acked")
+    }
+
+    private static func hasJournal(_ stem: String) -> Bool {
+        FileManager.default.fileExists(atPath: directory.appendingPathComponent(stem + ".recording.json").path)
+    }
+
+    private static func hasValidManifest(_ stem: String) -> Bool {
+        let path = directory.appendingPathComponent(stem + ".json")
+        guard let data = try? Data(contentsOf: path),
+              let chunk = try? JSONDecoder().decode(Chunk.self, from: data) else { return false }
+        return chunk.name == stem
+    }
+
+    private static func hasValidMarker(_ stem: String) -> Bool {
+        guard let data = try? Data(contentsOf: acknowledgedMarker(stem)),
+              let chunk = try? JSONDecoder().decode(Chunk.self, from: data) else { return false }
+        return chunk.name == stem
+    }
+
+    private static func isVerifiedAcknowledged(_ stem: String) -> Bool {
+        hasValidMarker(stem) || (UserDefaults.standard.stringArray(forKey: recentReceiptsKey) ?? []).contains(stem)
+    }
+
+    /// Verified receipts with audio remaining after a crash. Read-only.
+    static func orphanedAcknowledgedAudioCount() -> Int {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { file in
+            guard file.pathExtension == "m4a" else { return false }
+            let stem = file.deletingPathExtension().lastPathComponent
+            return !hasValidManifest(stem) && !hasJournal(stem) && isVerifiedAcknowledged(stem)
+        }.count
+    }
+
+    /// Audio without a valid queue record or receipt. Keep it for manual recovery.
+    static func unverifiedLocalAudioCount() -> Int {
+        let files = (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? []
+        return files.filter { file in
+            guard file.pathExtension == "m4a" else { return false }
+            let stem = file.deletingPathExtension().lastPathComponent
+            return !hasValidManifest(stem) && !hasJournal(stem) && !isVerifiedAcknowledged(stem)
+        }.count
+    }
+
     static func removeAcknowledged(_ chunk: Chunk) throws {
-        // Only called after a verified durable receipt. Commit dequeue before deleting its audio.
-        try FileManager.default.removeItem(at: chunk.manifestURL)
+        // Only called after a verified durable receipt. Same-directory rename
+        // commits the acknowledgment before audio can be removed.
+        let marker = acknowledgedMarker(chunk.name)
+        try FileManager.default.moveItem(at: chunk.manifestURL, to: marker)
         if FileManager.default.fileExists(atPath: chunk.audioURL.path) {
             try FileManager.default.removeItem(at: chunk.audioURL)
         }
+        try FileManager.default.removeItem(at: marker)
     }
 }
 

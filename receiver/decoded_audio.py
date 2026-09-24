@@ -12,6 +12,10 @@ FORMAT_VERSION = 1
 SAMPLE_RATE = 16000
 
 
+class EmptyDecodeError(ValueError):
+    """The decoder completed without producing usable audio."""
+
+
 class Lease:
     def __init__(self, cache: "DecodeCache", key: str, path: Path):
         self.cache = cache
@@ -64,6 +68,10 @@ class DecodeCache:
         lock = self._lock(key)
         with lock:
             path = self.path_for(key)
+            # An older decoder could leave a zero-byte placeholder after a
+            # successful exit. Never hand that file to ASR, VAD, or diarization.
+            if path.is_file() and path.stat().st_size == 0:
+                path.unlink()
             if not path.is_file():
                 partial = self.root / f"{key}.{uuid.uuid4().hex}.partial.wav"
                 runner = run or subprocess.run
@@ -73,10 +81,9 @@ class DecodeCache:
                          "-ar", str(SAMPLE_RATE), "-ac", "1", str(partial)],
                         check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120,
                     )
-                    if partial.is_file():
-                        os.replace(partial, path)
-                    elif not path.is_file():
-                        path.write_bytes(b"")
+                    if not partial.is_file() or partial.stat().st_size == 0:
+                        raise EmptyDecodeError("Empty decoded audio")
+                    os.replace(partial, path)
                 finally:
                     partial.unlink(missing_ok=True)
             with self._guard:

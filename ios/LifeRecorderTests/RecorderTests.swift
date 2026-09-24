@@ -120,4 +120,69 @@ final class RecorderTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: journalPath.path))
         try QueueStore.removeAcknowledged(chunk)
     }
+
+    func testAudioWithoutManifestOrReceiptIsPreserved() async throws {
+        let stem = UUID().uuidString.lowercased()
+        let audio = QueueStore.directory.appendingPathComponent(stem + ".m4a")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        try Data("unverified audio".utf8).write(to: audio)
+
+        _ = await QueueStore.recoverInterruptedFiles()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
+        XCTAssertGreaterThanOrEqual(QueueStore.unverifiedLocalAudioCount(), 1)
+    }
+
+    func testAudioWithCorruptManifestIsPreserved() async throws {
+        let stem = UUID().uuidString.lowercased()
+        let audio = QueueStore.directory.appendingPathComponent(stem + ".m4a")
+        let manifest = QueueStore.directory.appendingPathComponent(stem + ".json")
+        defer {
+            try? FileManager.default.removeItem(at: audio)
+            try? FileManager.default.removeItem(at: manifest)
+        }
+        try Data("unverified audio".utf8).write(to: audio)
+        try Data("invalid manifest".utf8).write(to: manifest)
+
+        _ = await QueueStore.recoverInterruptedFiles()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: manifest.path))
+    }
+
+    func testAcknowledgedMarkerFinishesCleanupAfterCrash() async throws {
+        let id = UUID()
+        let chunk = Chunk(id: id, startedAt: Date(), duration: 1,
+                          sha256: String(repeating: "a", count: 64))
+        let marker = QueueStore.directory.appendingPathComponent(chunk.name + ".acked")
+        defer {
+            try? FileManager.default.removeItem(at: chunk.audioURL)
+            try? FileManager.default.removeItem(at: chunk.manifestURL)
+            try? FileManager.default.removeItem(at: marker)
+        }
+        try Data("acknowledged audio".utf8).write(to: chunk.audioURL)
+        try JSONEncoder().encode(chunk).write(to: chunk.manifestURL, options: .atomic)
+        // Simulate termination after the atomic acknowledgement commit.
+        try FileManager.default.moveItem(at: chunk.manifestURL, to: marker)
+
+        _ = await QueueStore.recoverInterruptedFiles()
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: chunk.audioURL.path))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: marker.path))
+    }
+
+    func testReceiptOutsideRecentWindowDoesNotAuthorizeOrphanDeletion() async throws {
+        let key = QueueStore.recentReceiptsKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer { UserDefaults.standard.set(previous, forKey: key) }
+        let stem = UUID().uuidString.lowercased()
+        let audio = QueueStore.directory.appendingPathComponent(stem + ".m4a")
+        defer { try? FileManager.default.removeItem(at: audio) }
+        try Data("unverified audio".utf8).write(to: audio)
+        UserDefaults.standard.set([UUID().uuidString.lowercased()], forKey: key)
+
+        _ = await QueueStore.recoverInterruptedFiles()
+
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
+    }
 }

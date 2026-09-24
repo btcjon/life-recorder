@@ -2,7 +2,7 @@
 
 A native iPhone recorder and private Mac receiver. The iPhone records approximately one-minute AAC chunks. A Mac receiver transcribes them locally and maintains searchable daily transcripts plus one continuous Markdown transcript. Completed audio is retained locally for seven days (up to 4 GiB) for playback and offline speaker diarization; selected clips can be kept longer. Transcription stays on this Mac. Optional event summaries are separate and stay off unless `LIFE_RECORDER_REMOTE_SUMMARIES=1`.
 
-The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker badges, and manual speaker naming. Current behavior is [Architecture](#architecture). See [OPERATIONS.md](OPERATIONS.md) for safe restart and recovery; [INSTALL-NOTES.md](INSTALL-NOTES.md) is a dated setup journal, not the source of truth. Contributors should also read [AGENTS.md](AGENTS.md).
+The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker review, and manual speaker naming. Current behavior is [Architecture](#architecture). See [OPERATIONS.md](OPERATIONS.md) for safe restart and recovery; [INSTALL-NOTES.md](INSTALL-NOTES.md) is a dated setup journal, not the source of truth. Contributors should also read [AGENTS.md](AGENTS.md).
 
 ## Requirements
 
@@ -56,6 +56,8 @@ Enhancement is deliberately playback-only. Transcription, diarization, and voice
 
 The iPhone still uploads every completed chunk. It also computes a shadow activity decision from 20 ms peak/RMS windows and may send `X-Activity-Shadow`. That header never changes upload, retry, or local delete. `would_hold` is conservative and only emitted for complete finite coverage below -60 dBFS RMS and -45 dBFS peak; recovered, unsupported, or incomplete audio is `unknown`. The Mac stores valid telemetry, ignores invalid telemetry, and compares it only against completed VAD in the viewer summary.
 
+The iPhone upload panel distinguishes clips still queued locally, active upload, retry/backoff, a Mac storage receipt, and an interrupted clip needing local recovery. A receipt means the Mac durably stored audio, **not** that a transcript exists. While the app is foregrounded it asks the Mac, over the same pinned HTTPS connection, for the processing state of up to ten recent receipts. That bounded request is device-scoped and carries no transcript or audio. The Mac can report `pending`, `complete`, or `needs_attention`; the phone calls a completed job *processed* because a quiet recording may have no words. If the Mac cannot be reached, the panel says processing status is unavailable rather than guessing from the upload receipt. On verified acknowledgement, the phone atomically marks the queue record before deleting its audio; recovery removes only audio with that marker or a retained verified receipt ID. Audio without either proof is kept and reported for manual recovery, even when its manifest is missing or corrupt. Simulator compilation is not proof of a live phone transfer; see the latest dated installation note for the deployed phone build.
+
 The FluidAudio CLI currently needs the repository patch in `scripts/fluidaudio-vad-output-json.patch` to expose strict JSON from `vad-analyze --output-json`. Apply that patch to a compatible FluidAudio checkout and build its release CLI; do not commit the built binary or downloaded models. Install DeepFilterNet's official Apple Silicon release outside the repository and pass its absolute path through `--enhance-cli`.
 
 ## Recording behavior
@@ -74,6 +76,8 @@ This section is the current contract. When it disagrees with `INSTALL-NOTES.md` 
 
 This installation transcribes with FluidAudio Parakeet TDT v3 through `fluidaudiocli`. Whisper.cpp and an isolated MLX Whisper command remain optional engines. Each clip stores its engine and model. Markdown session headings mark 15 minutes without captured audio.
 
+The receiver rejects empty decoded WAVs, including zero-byte cache leftovers from earlier attempts. A failed chunk retains its source audio, a sanitized stage/error code, and an automatic retry budget of five attempts. Permanent failures or an exhausted budget become `needs_attention` instead of looping forever. Those clips stay visible in the viewer even when quiet/pending clips are hidden. A human can select one and press **Retry processing** after diagnosis; retry is unavailable if its original audio is missing, and never overwrites a completed transcript or deletes the recording. This is Mac processing state, separate from the iPhone upload queue.
+
 ### Shared decode and diarization
 
 ASR, voice-activity detection, and diarization share one 16 kHz decode of each clip. Diarization is offline. Speaker embeddings are 256-dimensional, extraction version 3. Loading a day does not enroll a voice, assign a name, or call a model.
@@ -82,9 +86,13 @@ ASR, voice-activity detection, and diarization share one 16 kHz decode of each c
 
 Automatic naming requires a profile of two accepted samples from two clips and 10 seconds of clean speech. A name is written automatically only when the best cosine score is at least 0.85 and leads the runner-up by at least 0.10. A confirmed name is a human assignment and is not replaced by a later automatic match. Automatic labels do not become enrollment samples. Sidebar badges use stored names only. A confirmed name is solid. Any other stored name is outlined and marked unconfirmed. Anonymous speaker keys are not shown.
 
+The viewer's Review tab pages through uncertain speaker turns, prioritizing turns with playable retained audio. Each card can play its own speaker span and open the source recording. Ranked names are explicitly unconfirmed and never preselected. Confirming a name is a human label for that speaker stretch; saving it as a reusable voice sample is a separate opt-in and still requires enough clean speech. Rejecting a suggested person is remembered for that turn without changing a stored label or training a voice. Voice-check counts are an explicit, read-only diagnostic, never computed as part of day loading. A held-out check on this installation produced no safe automatic acceptances, so the matching thresholds have **not** been loosened and suggestions are not evidence of a reliable auto-assign rate.
+
 ### Sidebar events
 
 Sidebar groups come from `display_blocks` in `receiver/viewer.py`. That function only arranges clips already loaded for the day. A group contains at least two transcribed clips on the same America/New_York date, and each following transcribed clip starts within 120 seconds of the previous transcribed clip's end. Blank transcripts stay inside a group only when transcribed clips on both sides join, and they do not extend the gap. A longer gap, a different local date, or an invalid timestamp is its own row. Quiet hours do not split these groups. The visible label is Event. The group id is the first 16 hex characters of the SHA-256 of the joined member ids. Opening a group does not fetch each child recording.
+
+A person can save a title and explicit first and last clip for a group. That edit lives in `event_edits`, separate from automatic grouping, speech-event playback, and capture-session headings. Its id stays stable when the title or boundaries change. A saved boundary wins over automatic grouping, keeps clips that later upload between its anchors, and is not replaced when a summary is regenerated. Automatic grouping stays visible as a suggestion. An edit must stay on one America/New_York day, in time order, cover at least two clips, and must not overlap another edit. Saving sends the revision last read; a mismatch is rejected and nothing is written. The route is human-authenticated. Machine credentials cannot use it. Sidebar names on a group are confirmed speaker assignments only.
 
 ### Event summaries
 

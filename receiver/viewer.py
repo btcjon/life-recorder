@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 import threading
+import uuid
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,6 +16,8 @@ from zoneinfo import ZoneInfo
 
 from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig, VerificationUnavailable
 from agent_api import http as agent_http
+import event_edits
+import speaker_review
 
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
@@ -180,6 +183,7 @@ APP = """<!doctype html>
     <img class="brand" src="/favicon-32.png" width="32" height="32" alt="Life Recorder">
     <nav aria-label="Library">
       <button id="tab-recordings" type="button" aria-pressed="true">Recordings</button>
+      <button id="tab-review" type="button" aria-pressed="false">Review</button>
       <button id="tab-people" type="button" aria-pressed="false">People</button>
     </nav>
     <label class="day-control"><input id="day" type="date" aria-label="Day"></label>
@@ -203,6 +207,11 @@ APP = """<!doctype html>
   <section id="people-view" hidden>
     <h2>People</h2>
     <div id="people"></div>
+  </section>
+  <section id="review-view" hidden aria-labelledby="review-heading">
+    <h2 id="review-heading">Review</h2>
+    <p id="review-status" class="meta" aria-live="polite">Unconfirmed speaker suggestions.</p>
+    <div id="review-list"></div>
   </section>
 </main>
 <footer id="player-bar">
@@ -236,7 +245,18 @@ header { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; min-hei
 nav button, #refresh { display: inline-flex; align-items: center; gap: 6px; }
 nav button::before, #refresh::before { content: ""; width: 14px; height: 14px; background: currentColor; -webkit-mask: var(--glyph) center / contain no-repeat; mask: var(--glyph) center / contain no-repeat; }
 #tab-recordings { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M2 3h12v2H2zm0 4h12v2H2zm0 4h8v2H2z'/%3E%3C/svg%3E"); }
+#tab-review { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M2 3h8v2H2zm0 4h12v2H2zm0 4h6v2H2z'/%3E%3C/svg%3E"); }
 #tab-people { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M8 8a3 3 0 1 0-3-3 3 3 0 0 0 3 3zm-5 6a5 5 0 0 1 10 0z'/%3E%3C/svg%3E"); }
+#review-view { padding: 28px clamp(22px, 5vw, 64px) 100px; overflow: auto; min-height: 0; }
+.review-card { max-width: 720px; }
+.review-actions, .suggestion-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.suggestion-row { margin: 0 0 8px; }
+.review-card .review-choice-label { display: grid; gap: 6px; max-width: 360px; }
+.review-choice-label select { width: 100%; }
+#review-list > button:first-child { margin-bottom: 12px; }
+body.review-mode .day-control, body.review-mode #filters { display: none !important; }
+.review-card select, .review-card input[type="checkbox"] { min-height: 34px; }
+.review-card label { display: flex; gap: 8px; align-items: center; margin: 8px 0; }
 #refresh { --glyph: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='black' d='M13 8a5 5 0 1 1-1.2-3.2L10 6.5h4V2.5L12.4 4A6.5 6.5 0 1 0 14.5 8z'/%3E%3C/svg%3E"); }
 .brand { display: block; width: 32px; height: 32px; margin: 0 4px 0 0; }
 h2 { margin: 0; font-size: 28px; letter-spacing: -.03em; font-weight: 680; }
@@ -254,7 +274,7 @@ header label { display: flex; gap: 6px; align-items: center; color: var(--muted)
 #status.alert { color: #ff8f8f; }
 #status.alert::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--danger); vertical-align: 1px; }
 #library { display: grid; grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); height: 100%; min-height: 0; }
-aside, #pane, #people-view { overflow: auto; min-height: 0; }
+aside, #pane, #people-view, #review-view { overflow: auto; min-height: 0; }
 aside { min-width: 300px; max-width: 360px; width: var(--sidebar); padding: 12px; background: var(--rail); border-right: 1px solid var(--line); }
 aside .row { padding: 6px 8px; margin: 0 0 4px; border-radius: 8px; line-height: 1.25; }
 aside .preview { margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -269,6 +289,10 @@ aside .event-people { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
 .badge.unconfirmed { background: transparent; border: 1px solid var(--line); color: var(--muted); }
 .toolbar button[aria-pressed="true"] { border-color: rgba(143,184,178,.28); background: rgba(143,184,178,.14); color: #d7e6e2; }
 .event-summary { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.35; max-height: 2.7em; margin-top: 6px; font-weight: 400; font-size: 13px; color: #c5d0db; }
+.event-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.event-form { display: grid; gap: 8px; margin-top: 8px; min-width: 0; }
+.event-form label { display: grid; gap: 4px; min-width: 0; color: var(--muted); font-size: 12px; }
+.event-form input, .event-form select { width: 100%; min-width: 0; }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
 #pane > * { max-width: 860px; }
 #people-view { padding: 28px clamp(22px, 5vw, 64px) 100px; }
@@ -320,7 +344,7 @@ summary { cursor: pointer; color: var(--muted); }
   html, body { overflow-x: hidden; }
   header { gap: 8px; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
   .header-primary { width: 100%; }
-  button, select, input, summary, .row, .event-toggle, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
+  button, select, input, summary, .row, .event-toggle, .event-edit, .pill, .person-option, .play-toggle, .replay { min-height: 44px; font-size: 16px; }
   .group-controls { width: 100%; }
   .group-controls button { flex: 1 1 120px; }
   .group-progress { flex-direction: column; align-items: stretch; }
@@ -331,10 +355,13 @@ summary { cursor: pointer; color: var(--muted); }
   #filters .filter-body input[type="search"] { width: 9rem; min-width: 8rem; }
   #status { width: 100%; margin: 0; }
   #library { display: block; height: auto; min-height: 0; }
-  aside, #pane, #people-view { overflow: visible; min-width: 0; }
+  aside, #pane, #people-view, #review-view { overflow: visible; min-width: 0; }
   aside { width: auto; max-width: none; min-width: 0; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); border-right: 0; }
   #pane { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
-  #people-view { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
+  #people-view, #review-view { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
+  .review-card, .review-actions, .suggestion-row { min-width: 0; }
+  .review-card button, .review-card select, .review-card label { min-height: 44px; font-size: 16px; }
+  .review-actions button, .suggestion-row button { flex: 1 1 140px; }
   body.mobile-list #pane { display: none; }
   body.mobile-detail aside { display: none; }
   body.mobile-list #player-bar, body.mobile-people #player-bar { display: none; }
@@ -352,7 +379,7 @@ summary { cursor: pointer; color: var(--muted); }
   html, body { height: 100%; overflow: hidden; }
   header, #player-bar { flex: 0 0 auto; }
   main { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  #library, #people-view { flex: 1 1 auto; min-height: 0; }
+  #library, #people-view, #review-view { flex: 1 1 auto; min-height: 0; }
   #filters { display: contents; }
   #filters > summary { display: none; }
   #filters .filter-body { display: flex; flex-wrap: nowrap; }
@@ -396,7 +423,11 @@ JS = r"""
   const playOriginal = document.getElementById("play-original");
   const playEnhanced = document.getElementById("play-enhanced");
   const tabRecordings = document.getElementById("tab-recordings");
+  const tabReview = document.getElementById("tab-review");
   const tabPeople = document.getElementById("tab-people");
+  const reviewView = document.getElementById("review-view");
+  const reviewList = document.getElementById("review-list");
+  const reviewStatus = document.getElementById("review-status");
   const filters = document.getElementById("filters");
   let payload = null;
   let audioUrl = null;
@@ -426,6 +457,15 @@ JS = r"""
   let identityNewName = "";
   let mobileDetailOpen = false;
   let listScroll = 0;
+  let eventEditor = null;
+  let reviewItems = [];
+  let reviewCursor = null;
+  let reviewLoaded = false;
+  let reviewLoading = false;
+  let reviewError = "";
+  let reviewChoices = {};
+  let reviewSamples = {};
+  let reviewDiagnostics = null;
   const MOBILE_BP = 760;
   function isMobile() {
     return window.matchMedia("(max-width: " + MOBILE_BP + "px)").matches;
@@ -465,7 +505,7 @@ JS = r"""
       const text = chunk.transcript || "";
       const turns = chunk.speakers || [];
       const turnCount = Number(chunk.speaker_turn_count || 0) || turns.length;
-      if (!showAll.checked && !text.trim() && turnCount === 0) return false;
+      if (!showAll.checked && chunk.status !== "needs_attention" && !text.trim() && turnCount === 0) return false;
       return !query || text.toLowerCase().includes(query) || (chunk.started_local || "").toLowerCase().includes(query);
     });
   }
@@ -580,9 +620,12 @@ JS = r"""
   function setView(next) {
     view = next;
     tabRecordings.setAttribute("aria-pressed", String(view === "recordings"));
+    tabReview.setAttribute("aria-pressed", String(view === "review"));
     tabPeople.setAttribute("aria-pressed", String(view === "people"));
     library.hidden = view !== "recordings";
     peopleView.hidden = view !== "people";
+    reviewView.hidden = view !== "review";
+    if (view === "review" && !reviewLoaded && !reviewLoading) loadSpeakerReview(true);
     render();
   }
   function identityState(turn) {
@@ -792,7 +835,7 @@ JS = r"""
       peek.textContent = preview(chunk.transcript);
       row.appendChild(title);
       row.appendChild(peek);
-      const audioState = chunk.status === "pending" ? "Processing" : (chunk.status !== "complete" ? "Processing failed" : (chunk.audio_playable ? "" : "Audio not kept"));
+      const audioState = chunk.status === "pending" ? "Processing" : (chunk.status === "needs_attention" ? "Processing needs attention" : (chunk.status !== "complete" ? "Processing failed" : (chunk.audio_playable ? "" : "Audio not kept")));
       if (audioState) {
         const audioNote = document.createElement("div");
         audioNote.className = "meta";
@@ -820,7 +863,8 @@ JS = r"""
       if (!flat && block.kind === "event") {
         const members = (block.chunk_ids || []).map((id) => byId.get(id)).filter((chunk) => chunk && visible.has(chunk.id));
         const named = members.filter((chunk) => (chunk.transcript || "").trim());
-        if (named.length >= 2) {
+        const manual = block.source === "manual";
+        if ((manual && members.length) || named.length >= 2) {
           const box = document.createElement("div");
           box.className = "event";
           const toggle = document.createElement("button");
@@ -839,16 +883,16 @@ JS = r"""
           const range = sameDay && startLocal.length > 16 && endLocal.length > 16
             ? startLocal.slice(11, 16) + "–" + endLocal.slice(11)
             : startLocal + " – " + endLocal;
-          title.textContent = "Event · " + range;
+          title.textContent = manual && block.title ? block.title : ("Event · " + range);
           const meta = document.createElement("div");
           meta.className = "meta";
           const seconds = members.reduce((sum, chunk) => sum + (Number(chunk.duration) || 0), 0);
-          meta.textContent = members.length + " clips · " + recordedLength(seconds);
+          meta.textContent = (manual ? "Edited" : "Suggested") + " · " + members.length + " clips · " + recordedLength(seconds);
           toggle.appendChild(title);
           toggle.appendChild(meta);
           const people = document.createElement("div");
           people.className = "event-people";
-          const speakers = block.speakers || [];
+          const speakers = (block.speakers || []).filter((person) => person && person.confirmed && person.name);
           if (!speakers.length) {
             const unnamed = document.createElement("div");
             unnamed.className = "meta";
@@ -878,7 +922,8 @@ JS = r"""
           } else {
             const peek = document.createElement("div");
             peek.className = "preview meta";
-            peek.textContent = "Excerpt · " + preview(block.preview || named[0].transcript);
+            const excerpt = block.preview || (named[0] && named[0].transcript) || "";
+            peek.textContent = "Excerpt · " + preview(excerpt);
             toggle.appendChild(peek);
             const status = document.createElement("div");
             status.className = "meta";
@@ -886,12 +931,143 @@ JS = r"""
               : (block.summary_state === "unavailable" ? "Summary unavailable" : "Summary pending");
             toggle.appendChild(status);
           }
+          if (manual && block.suggestion && block.suggestion.parts && block.suggestion.parts.length) {
+            const suggestion = document.createElement("div");
+            suggestion.className = "meta";
+            suggestion.textContent = "Suggested: " + block.suggestion.parts.map((part) => {
+              if (part.kind === "event") return (part.started_local || "") + " – " + (part.ended_local || "");
+              return part.started_local || "Recording";
+            }).join("; ");
+            toggle.appendChild(suggestion);
+          }
           toggle.addEventListener("click", () => {
             if (expandedBlocks.has(block.id)) expandedBlocks.delete(block.id);
             else expandedBlocks.add(block.id);
             renderList();
           });
           box.appendChild(toggle);
+          const tools = document.createElement("div");
+          tools.className = "event-tools";
+          const edit = document.createElement("button");
+          edit.type = "button";
+          edit.className = "event-edit";
+          edit.textContent = eventEditor && eventEditor.blockId === block.id ? "Close" : "Edit";
+          edit.setAttribute("aria-label", manual ? "Edit event title and boundaries" : "Edit this suggested event");
+          edit.addEventListener("click", () => {
+            if (eventEditor && eventEditor.blockId === block.id) eventEditor = null;
+            else {
+              eventEditor = {
+                blockId: block.id,
+                manual: manual,
+                editId: manual ? block.id : "",
+                revision: manual ? Number(block.revision || 0) : 0,
+                title: manual ? (block.title || "") : "",
+                start: block.start_chunk_id || "",
+                end: block.end_chunk_id || "",
+                error: "",
+                saving: false,
+              };
+            }
+            renderList();
+          });
+          tools.appendChild(edit);
+          box.appendChild(tools);
+          if (eventEditor && eventEditor.blockId === block.id) {
+            const editor = eventEditor;
+            const form = document.createElement("div");
+            form.className = "event-form";
+            const titleLabel = document.createElement("label");
+            titleLabel.textContent = "Title";
+            const titleInput = document.createElement("input");
+            titleInput.type = "text";
+            titleInput.maxLength = 80;
+            titleInput.value = editor.title;
+            titleInput.setAttribute("aria-label", "Event title");
+            titleInput.addEventListener("input", () => { editor.title = titleInput.value; });
+            titleLabel.appendChild(titleInput);
+            const options = (payload.chunks || []).filter((chunk) => chunk.started_local || chunk.started);
+            const boundary = (label, key) => {
+              const field = document.createElement("label");
+              field.textContent = label;
+              const select = document.createElement("select");
+              select.setAttribute("aria-label", label);
+              for (const chunk of options) {
+                const choice = document.createElement("option");
+                choice.value = chunk.id;
+                choice.textContent = chunk.started_local || chunk.started || "Recording";
+                if (chunk.id === editor[key]) choice.selected = true;
+                select.appendChild(choice);
+              }
+              select.addEventListener("change", () => { editor[key] = select.value; });
+              field.appendChild(select);
+              return field;
+            };
+            const save = document.createElement("button");
+            save.type = "button";
+            save.textContent = editor.saving ? "Saving" : "Save";
+            save.disabled = !!editor.saving;
+            save.addEventListener("click", async () => {
+              if (editor.saving) return;
+              editor.saving = true;
+              editor.error = "";
+              renderList();
+              const body = {
+                title: editor.title,
+                start_chunk_id: editor.start,
+                end_chunk_id: editor.end,
+                expected_revision: editor.revision,
+              };
+              if (editor.manual && editor.editId) body.id = editor.editId;
+              let response;
+              try {
+                response = await fetch("/v1/event-edits", {
+                  method: "POST",
+                  headers: { ...authHeaders(), "Content-Type": "application/json" },
+                  body: JSON.stringify(body),
+                });
+              } catch (error) {
+                response = null;
+              }
+              if (!response) {
+                editor.saving = false;
+                editor.error = "Couldn't save this event.";
+                renderList();
+                return;
+              }
+              if (response.status === 409) {
+                editor.saving = false;
+                editor.error = "This event changed. Refresh before saving again.";
+                renderList();
+                return;
+              }
+              if (!response.ok) {
+                let message = "Couldn't save this event.";
+                try {
+                  const data = await response.json();
+                  if (data && typeof data.error === "string") message = data.error;
+                } catch (error) {
+                  message = "Couldn't save this event.";
+                }
+                editor.saving = false;
+                editor.error = message;
+                renderList();
+                return;
+              }
+              eventEditor = null;
+              await loadDay();
+            });
+            form.appendChild(titleLabel);
+            form.appendChild(boundary("Starts with", "start"));
+            form.appendChild(boundary("Ends with", "end"));
+            form.appendChild(save);
+            if (editor.error) {
+              const problem = document.createElement("div");
+              problem.className = "meta";
+              problem.textContent = editor.error;
+              form.appendChild(problem);
+            }
+            box.appendChild(form);
+          }
           if (open) {
             for (const chunk of members) appendChunk(chunk, box);
           }
@@ -1014,7 +1190,7 @@ JS = r"""
     return fetch("/v1/turns/" + turn.id + "/label", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId })
+      body: JSON.stringify({ person_id: personId, use_sample: useSample === true })
     }).then((response) => {
       if (!response.ok) throw new Error("label");
       const person = (payload.people || []).find((item) => item.id === personId);
@@ -1053,11 +1229,28 @@ JS = r"""
     else note.textContent = "Tap a name to assign this stretch.";
     const cleanSeconds = (group.turns || []).reduce((sum, turn) => sum + (Number(turn.clean_seconds) || 0), 0);
     const sampleReady = cleanSeconds >= 5;
+    if (!sampleReady) identitySample = false;
     const sampleNote = document.createElement("p");
     sampleNote.className = "meta";
     sampleNote.textContent = sampleReady
-      ? "Tagging this stretch also saves a voice sample."
+      ? (identitySample
+        ? "Tagging this stretch also saves a voice sample."
+        : "Leave this unchecked to name the stretch without saving a voice sample.")
       : "This piece is under 5 seconds of one clean voice, so it can be named but not saved as a voice sample.";
+    const sampleLabel = document.createElement("label");
+    sampleLabel.textContent = "Save a voice sample";
+    const sampleBox = document.createElement("input");
+    sampleBox.type = "checkbox";
+    sampleBox.checked = sampleReady && identitySample;
+    sampleBox.disabled = !sampleReady;
+    sampleBox.setAttribute("aria-label", "Save a voice sample");
+    sampleBox.addEventListener("change", () => {
+      identitySample = sampleReady && sampleBox.checked;
+      sampleNote.textContent = identitySample
+        ? "Tagging this stretch also saves a voice sample."
+        : "Leave this unchecked to name the stretch without saving a voice sample.";
+    });
+    sampleLabel.prepend(sampleBox);
     const footer = document.createElement("div");
     footer.className = "popover-footer";
     function currentId() { return currentPersonId(group); }
@@ -1101,12 +1294,15 @@ JS = r"""
       footer.appendChild(back);
       footer.appendChild(create);
       box.appendChild(name);
+      if (sampleReady) box.appendChild(sampleLabel);
       box.appendChild(sampleNote);
       box.appendChild(footer);
       box.appendChild(note);
       setTimeout(() => name.focus(), 0);
       return box;
     }
+    if (sampleReady) box.appendChild(sampleLabel);
+    box.appendChild(sampleNote);
     for (const person of (payload.people || [])) {
       const row = document.createElement("button");
       row.type = "button";
@@ -1131,7 +1327,6 @@ JS = r"""
     create.textContent = "New person";
     create.addEventListener("click", () => { identityMode = "new"; identityDraft = null; identityNewName = ""; render(); });
     box.appendChild(create);
-    box.appendChild(sampleNote);
     box.appendChild(note);
     return box;
   }
@@ -1233,12 +1428,39 @@ JS = r"""
     modes.appendChild(fullRecordingBtn);
     pane.appendChild(title);
     pane.appendChild(meta);
+    if (chunk.status === "needs_attention") {
+      const notice = document.createElement("p");
+      notice.className = "meta";
+      notice.setAttribute("role", "status");
+      notice.textContent = "Mac processing stopped after repeated failures. The original recording is kept if available.";
+      const retry = document.createElement("button");
+      retry.type = "button";
+      retry.textContent = "Retry processing";
+      retry.addEventListener("click", async () => {
+        retry.disabled = true;
+        let response;
+        try {
+          response = await fetch("/v1/chunks/" + chunk.id + "/retry", {
+            method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: "{}"
+          });
+        } catch (error) { response = null; }
+        if (response && response.ok) await loadDay();
+        else {
+          notice.textContent = response && response.status === 409
+            ? "Original audio is unavailable; this recording cannot be retried."
+            : "Retry did not start. Please try again.";
+          retry.disabled = false;
+        }
+      });
+      pane.appendChild(notice);
+      pane.appendChild(retry);
+    }
     pane.appendChild(modes);
     if (!Array.isArray(chunk.speakers)) {
-      ensureReview(chunk);
+      if (chunk.status === "complete") ensureReview(chunk);
       const waiting = document.createElement("p");
       waiting.className = "meta";
-      waiting.textContent = "Loading speakers…";
+      waiting.textContent = chunk.status === "complete" ? "Loading speakers…" : "Speaker analysis has not finished.";
       pane.appendChild(waiting);
       const body = document.createElement("p");
       body.textContent = chunk.transcript || "No transcript yet.";
@@ -1442,13 +1664,327 @@ JS = r"""
       peoplePane.appendChild(row);
     }
   }
+  function easternDay(iso) {
+    try {
+      return new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit"
+      }).format(new Date(iso));
+    } catch (error) {
+      return String(iso || "").slice(0, 10);
+    }
+  }
+  function playReviewSpan(item) {
+    if (!item || !item.audio_usable) return;
+    const audioPath = "/v1/audio/" + item.chunk_id;
+    const nextAudioId = "review:" + item.turn_id;
+    const startAt = Number(item.started) || 0;
+    const stopAt = Number(item.ended) || 0;
+    activeGroupKey = item.turn_id;
+    clipStartTime = startAt;
+    clipStopTime = stopAt;
+    nowPlaying.textContent = "Speaker span · not confirmed";
+    const jump = () => {
+      if (loadedAudioId !== nextAudioId) return;
+      activeGroupKey = item.turn_id;
+      clipStartTime = startAt;
+      clipStopTime = stopAt;
+      player.currentTime = startAt;
+      player.play().catch(() => {});
+      updateCardPlayback();
+    };
+    if (nextAudioId === loadedAudioId && player.readyState) {
+      jump();
+      return;
+    }
+    loadedAudioId = nextAudioId;
+    audioGeneration += 1;
+    if (audioController) audioController.abort();
+    audioController = new AbortController();
+    if (audioUrl) { URL.revokeObjectURL(audioUrl); audioUrl = null; }
+    player.removeAttribute("src");
+    const requestedId = nextAudioId;
+    fetch(audioPath, { headers: authHeaders(), signal: audioController.signal }).then((response) => response.ok ? response.blob() : Promise.reject()).then((blob) => {
+      if (loadedAudioId !== requestedId) return;
+      audioUrl = URL.createObjectURL(blob);
+      player.addEventListener("loadedmetadata", jump, { once: true });
+      player.src = audioUrl;
+    }).catch((error) => {
+      if (error && error.name === "AbortError") return;
+      if (loadedAudioId === requestedId) {
+        loadedAudioId = null;
+        nowPlaying.textContent = "Audio could not be loaded · Refresh to retry";
+      }
+    });
+  }
+  async function openReviewClip(item) {
+    const localDay = easternDay(item.clip_started);
+    selectedKind = "chunk";
+    selectedId = item.chunk_id;
+    mobileDetailOpen = true;
+    view = "recordings";
+    if (day.value !== localDay) {
+      day.value = localDay;
+      await loadDay();
+    }
+    setView("recordings");
+    const row = document.getElementById("recording-" + item.chunk_id);
+    if (row) row.focus();
+  }
+  async function confirmReview(item) {
+    const personId = reviewChoices[item.turn_id] || "";
+    if (!personId) return;
+    const useSample = reviewSamples[item.turn_id] === true;
+    reviewError = "";
+    const response = await fetch("/v1/turns/" + item.turn_id + "/label", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ person_id: personId, use_sample: useSample })
+    });
+    if (!response.ok) {
+      reviewError = "Could not confirm that name.";
+      renderReview();
+      return;
+    }
+    reviewItems = reviewItems.filter((row) => row.group_id !== item.group_id);
+    delete reviewChoices[item.turn_id];
+    delete reviewSamples[item.turn_id];
+    reviewStatus.textContent = "Confirmed. That name is a human label.";
+    renderReview();
+  }
+  async function rejectReview(item, personId) {
+    reviewError = "";
+    const response = await fetch("/v1/turns/" + item.turn_id + "/reject", {
+      method: "POST",
+      headers: { ...authHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ person_id: personId })
+    });
+    if (!response.ok) {
+      reviewError = "Could not reject that suggestion.";
+      renderReview();
+      return;
+    }
+    item.suggestions = (item.suggestions || []).filter((suggestion) => suggestion.person_id !== personId);
+    if (item.stored_person_id === personId) {
+      item.stored_person_id = null;
+      item.stored_name = null;
+    }
+    if (reviewChoices[item.turn_id] === personId) reviewChoices[item.turn_id] = "";
+    reviewStatus.textContent = "Suggestion rejected. The turn was not relabeled.";
+    renderReview();
+  }
+  async function loadReviewDiagnostics() {
+    const response = await fetch("/v1/speaker-review/diagnostics", { headers: authHeaders(), cache: "no-store" });
+    if (!response.ok) {
+      reviewError = "Couldn't load voice-check counts.";
+      renderReview();
+      return;
+    }
+    reviewDiagnostics = await response.json();
+    renderReview();
+  }
+  async function loadSpeakerReview(reset) {
+    reviewLoading = true;
+    reviewError = "";
+    if (reset) {
+      reviewItems = [];
+      reviewCursor = null;
+      reviewLoaded = false;
+    }
+    if (view === "review") renderReview();
+    const params = new URLSearchParams();
+    params.set("limit", "20");
+    if (!reset && reviewCursor) params.set("cursor", reviewCursor);
+    let response;
+    try {
+      response = await fetch("/v1/speaker-review?" + params.toString(), { headers: authHeaders(), cache: "no-store" });
+    } catch (error) {
+      response = null;
+    }
+    reviewLoading = false;
+    if (!response || !response.ok) {
+      reviewError = "Couldn't load speaker review.";
+      if (view === "review") renderReview();
+      return;
+    }
+    const page = await response.json();
+    const incoming = Array.isArray(page.items) ? page.items : [];
+    reviewItems = reset ? incoming : reviewItems.concat(incoming);
+    reviewCursor = page.next_cursor || null;
+    reviewLoaded = true;
+    if (view === "review") renderReview();
+  }
+  function renderReview() {
+    reviewView.hidden = false;
+    reviewList.replaceChildren();
+    reviewStatus.textContent = reviewError || (reviewLoading ? "Loading unconfirmed speaker turns." : (reviewItems.length ? "These names are suggestions until you confirm one." : "No uncertain speaker turns."));
+    const counts = document.createElement("button");
+    counts.type = "button";
+    counts.textContent = "Voice-check counts";
+    counts.addEventListener("click", () => loadReviewDiagnostics());
+    reviewList.appendChild(counts);
+    if (reviewDiagnostics) {
+      const summary = document.createElement("p");
+      summary.className = "meta";
+      const reasons = reviewDiagnostics.rejection_reasons || {};
+      summary.textContent = "Held-out groups " + Number(reviewDiagnostics.groups || 0)
+        + " · rank 1 " + Number(reviewDiagnostics.rank1_correct_groups || 0)
+        + " · auto acceptances " + Number(reasons.accepted || 0);
+      reviewList.appendChild(summary);
+    }
+    if (!reviewItems.length && !reviewLoading) {
+      const empty = document.createElement("p");
+      empty.textContent = "No uncertain speaker turns.";
+      reviewList.appendChild(empty);
+    }
+    for (const item of reviewItems) {
+      const card = document.createElement("article");
+      card.className = "group review-card";
+      card.setAttribute("data-group-key", item.turn_id);
+      card.setAttribute("data-start", String(item.started));
+      card.setAttribute("data-end", String(item.ended));
+      const title = document.createElement("h3");
+      title.textContent = "Unconfirmed speaker";
+      const badge = document.createElement("span");
+      badge.className = "badge suggested";
+      badge.textContent = item.label_source === "automatic" && item.stored_name
+        ? "Unconfirmed automatic guess"
+        : "Unconfirmed suggestion";
+      const when = document.createElement("p");
+      when.className = "meta";
+      const start = Number(item.started);
+      const end = Number(item.ended);
+      when.textContent = (Number.isFinite(start) ? start.toFixed(1) : "?") + "–" + (Number.isFinite(end) ? end.toFixed(1) : "?") + "s"
+        + (item.audio_usable ? "" : " · audio unavailable");
+      card.appendChild(title);
+      card.appendChild(badge);
+      card.appendChild(when);
+      if (item.label_source === "automatic" && item.stored_name) {
+        const guess = document.createElement("p");
+        guess.textContent = "Automatic guess: " + item.stored_name + " · not confirmed";
+        card.appendChild(guess);
+      }
+      const suggestions = item.suggestions || [];
+      for (const suggestion of suggestions) {
+        const row = document.createElement("div");
+        row.className = "suggestion-row";
+        const name = document.createElement("span");
+        name.textContent = (suggestion.name || "Unnamed") + " · unconfirmed suggestion";
+        const reject = document.createElement("button");
+        reject.type = "button";
+        reject.textContent = "Reject";
+        reject.setAttribute("aria-label", "Reject suggestion " + (suggestion.name || "person"));
+        reject.addEventListener("click", () => rejectReview(item, suggestion.person_id));
+        row.appendChild(name);
+        row.appendChild(reject);
+        card.appendChild(row);
+      }
+      const choiceLabel = document.createElement("label");
+      choiceLabel.className = "review-choice-label";
+      choiceLabel.textContent = "Identify as";
+      const choice = document.createElement("select");
+      choice.setAttribute("aria-label", "Person for this speaker turn");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = "Choose a name";
+      choice.appendChild(blank);
+      for (const suggestion of suggestions) {
+        const option = document.createElement("option");
+        option.value = suggestion.person_id;
+        option.textContent = (suggestion.name || "Unnamed") + " · unconfirmed";
+        choice.appendChild(option);
+      }
+      const suggestedIds = new Set(suggestions.map((suggestion) => suggestion.person_id));
+      for (const person of ((payload && payload.people) || [])) {
+        if (!person || !person.id || suggestedIds.has(person.id)) continue;
+        const option = document.createElement("option");
+        option.value = person.id;
+        option.textContent = person.name || "Unnamed person";
+        choice.appendChild(option);
+      }
+      choice.value = reviewChoices[item.turn_id] || "";
+      if (choice.value && ![...choice.options].some((option) => option.value === choice.value)) choice.value = "";
+      choice.addEventListener("change", () => {
+        reviewChoices[item.turn_id] = choice.value;
+        const confirm = card.querySelector(".review-confirm");
+        if (confirm) confirm.disabled = !choice.value;
+      });
+      choiceLabel.appendChild(choice);
+      card.appendChild(choiceLabel);
+      const sampleLabel = document.createElement("label");
+      const sampleBox = document.createElement("input");
+      sampleBox.type = "checkbox";
+      const canSample = Number(item.clean_seconds) >= 5 && !!item.audio_usable;
+      sampleBox.checked = canSample && reviewSamples[item.turn_id] === true;
+      sampleBox.disabled = !canSample;
+      sampleBox.setAttribute("aria-label", "Save a voice sample for this confirmation");
+      sampleBox.addEventListener("change", () => { reviewSamples[item.turn_id] = sampleBox.checked === true; });
+      sampleLabel.appendChild(sampleBox);
+      sampleLabel.appendChild(document.createTextNode(canSample ? "Save a voice sample" : "Not enough clean speech to save a voice sample"));
+      card.appendChild(sampleLabel);
+      const actions = document.createElement("div");
+      actions.className = "review-actions";
+      const confirm = document.createElement("button");
+      confirm.type = "button";
+      confirm.className = "review-confirm";
+      confirm.textContent = "Confirm";
+      confirm.disabled = !choice.value;
+      confirm.setAttribute("aria-label", "Confirm selected name");
+      confirm.addEventListener("click", () => confirmReview(item));
+      const play = document.createElement("button");
+      play.type = "button";
+      play.className = "play-toggle";
+      play.textContent = "Play";
+      play.disabled = !item.audio_usable;
+      play.setAttribute("aria-label", "Play this speaker span");
+      play.addEventListener("click", () => playReviewSpan(item));
+      const open = document.createElement("button");
+      open.type = "button";
+      open.textContent = "Open recording";
+      open.setAttribute("aria-label", "Open the source recording");
+      open.addEventListener("click", () => openReviewClip(item));
+      actions.appendChild(confirm);
+      actions.appendChild(play);
+      actions.appendChild(open);
+      const meter = document.createElement("div");
+      meter.className = "group-progress";
+      const progress = document.createElement("progress");
+      progress.max = Math.max(0, end - start) || 1;
+      progress.value = 0;
+      const clock = document.createElement("span");
+      clock.className = "group-time";
+      clock.textContent = "0:00 / " + formatTime(Math.max(0, end - start));
+      meter.appendChild(progress);
+      meter.appendChild(clock);
+      card.appendChild(actions);
+      card.appendChild(meter);
+      reviewList.appendChild(card);
+    }
+    if (reviewCursor) {
+      const more = document.createElement("button");
+      more.type = "button";
+      more.textContent = "More";
+      more.addEventListener("click", () => loadSpeakerReview(false));
+      reviewList.appendChild(more);
+    }
+  }
   function render() {
-    if (!payload) return;
     const mobile = isMobile();
+    document.body.classList.toggle("review-mode", view === "review");
+    document.body.classList.toggle("mobile-review", mobile && view === "review");
     document.body.classList.toggle("mobile-list", mobile && view === "recordings" && !mobileDetailOpen);
     document.body.classList.toggle("mobile-detail", mobile && view === "recordings" && mobileDetailOpen);
     document.body.classList.toggle("mobile-people", mobile && view === "people");
     if (!mobile) mobileDetailOpen = false;
+    if (view === "review") {
+      document.body.classList.remove("mobile-list", "mobile-detail", "mobile-people");
+      library.hidden = true;
+      peopleView.hidden = true;
+      reviewView.hidden = false;
+      renderReview();
+      return;
+    }
+    reviewView.hidden = true;
+    if (!payload) return;
     if (view === "people") {
       document.body.classList.remove("mobile-list", "mobile-detail");
       renderPeople();
@@ -1477,8 +2013,12 @@ JS = r"""
     closePopover(true);
   });
   tabRecordings.addEventListener("click", () => setView("recordings"));
+  tabReview.addEventListener("click", () => setView("review"));
   tabPeople.addEventListener("click", () => setView("people"));
-  document.getElementById("refresh").addEventListener("click", loadDay);
+  document.getElementById("refresh").addEventListener("click", () => {
+    if (view === "review") loadSpeakerReview(true);
+    else loadDay();
+  });
   day.addEventListener("change", loadDay);
   search.addEventListener("input", render);
   showAll.addEventListener("change", render);
@@ -1652,6 +2192,54 @@ class ViewerHandler(BaseHTTPRequestHandler):
                     remaining -= len(chunk)
         self.close_connection = True
 
+    def _speaker_review(self, parsed) -> bool:
+        if parsed.path not in ("/v1/speaker-review", "/v1/speaker-review/diagnostics"):
+            return False
+        try:
+            if len(parsed.query) > 600:
+                raise ValueError("query")
+            params = parse_qs(parsed.query, keep_blank_values=False, strict_parsing=True) if parsed.query else {}
+            with self._inbox().connect() as db:
+                if parsed.path.endswith("/diagnostics"):
+                    if params:
+                        raise ValueError("query")
+                    report = speaker_review.diagnose_held_out(db)
+                else:
+                    if set(params) - {"limit", "cursor"}:
+                        raise ValueError("query")
+                    limit = speaker_review.PAGE_DEFAULT
+                    if "limit" in params:
+                        raw = params["limit"]
+                        if len(raw) != 1 or not raw[0].isdigit() or len(raw[0]) > 3:
+                            raise ValueError("limit")
+                        limit = int(raw[0])
+                    cursor = None
+                    if "cursor" in params:
+                        raw = params["cursor"]
+                        if len(raw) != 1:
+                            raise ValueError("cursor")
+                        cursor = raw[0]
+                    report = speaker_review.review_queue(db, limit=limit, cursor=cursor)
+        except ValueError:
+            self._json(400, {"error": "Invalid review request"})
+            return True
+        self._json(200, report)
+        return True
+
+    def _reject_suggestion(self, path: str, body: dict):
+        turn_id = path[len("/v1/turns/"):-len("/reject")]
+        person_id = body.get("person_id", "")
+        if not isinstance(person_id, str) or set(body) - {"person_id"}:
+            return self._json(400, {"error": "Invalid rejection"})
+        try:
+            with self._inbox().connect() as db:
+                saved = speaker_review.reject_suggestion(db, turn_id, person_id)
+        except ValueError:
+            return self._json(400, {"error": "Invalid rejection"})
+        if not saved:
+            return self._json(404, {"error": "Turn or person unavailable"})
+        return self._json(200, {"rejected": True})
+
     def do_HEAD(self):
         if not self._host_ok() or not self._origin_ok():
             return self._json(403, {"error": "Forbidden"})
@@ -1752,6 +2340,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._json(400, {"error": "Invalid day"})
             return self._json(200, self._inbox().viewer_day(day))
+        if self._speaker_review(parsed):
+            return
         return self._json(404, {"error": "Not found"})
 
     def do_POST(self):
@@ -1792,6 +2382,27 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Invalid JSON"})
         if not isinstance(body, dict):
             return self._json(400, {"error": "JSON object required"})
+        if path == "/v1/event-edits":
+            try:
+                return self._json(200, self._inbox().save_event_edit(body))
+            except event_edits.EditError as error:
+                return self._json(error.status, error.payload)
+        if path.startswith("/v1/chunks/") and path.endswith("/retry"):
+            if body:
+                return self._json(400, {"error": "No retry fields expected"})
+            chunk_id = path[len("/v1/chunks/"):-len("/retry")]
+            try:
+                normalized = str(uuid.UUID(chunk_id))
+                if normalized != chunk_id.lower():
+                    raise ValueError("chunk id")
+            except ValueError:
+                return self._json(400, {"error": "Invalid recording"})
+            record = self._inbox().retry_chunk(normalized)
+            if record is None:
+                return self._json(404, {"error": "Recording unavailable"})
+            if record["status"] == "needs_attention" and not record["retry_eligible"]:
+                return self._json(409, {"error": "Original audio unavailable"})
+            return self._json(200, record)
         if path == "/v1/people":
             try:
                 return self._json(201, self._inbox().create_person(body.get("name", "")))
@@ -1803,9 +2414,14 @@ class ViewerHandler(BaseHTTPRequestHandler):
             except ValueError:
                 return self._json(400, {"error": "Invalid name"})
             return self._json(200, person) if person else self._json(404, {"error": "Person unavailable"})
+        if path.startswith("/v1/turns/") and path.endswith("/reject"):
+            return self._reject_suggestion(path, body)
         if path.startswith("/v1/turns/") and path.endswith("/label"):
             turn_id = path[len("/v1/turns/"):-len("/label")]
-            if self._inbox().label_turn(turn_id, body.get("person_id", ""), bool(body.get("use_sample"))):
+            person_id = body.get("person_id", "")
+            if not isinstance(person_id, str):
+                return self._json(400, {"error": "Invalid person"})
+            if self._inbox().label_turn(turn_id, person_id, body.get("use_sample") is True):
                 return self._json(200, {"labeled": True})
             return self._json(404, {"error": "Turn or person unavailable"})
         if path.startswith("/v1/chunks/") and path.endswith("/keep"):

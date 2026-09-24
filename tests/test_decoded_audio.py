@@ -16,6 +16,35 @@ from receiver import Inbox
 
 
 class SharedDecodeTests(unittest.TestCase):
+    def test_zero_byte_cache_is_rebuilt_and_empty_output_is_not_cached(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            work = Path(scratch)
+            source = work / "clip.m4a"
+            source.write_bytes(b"audio")
+            cache = decoded_audio.DecodeCache(work)
+            cached = cache.path_for(cache.key_for("clip", source))
+            cached.write_bytes(b"")
+            calls = []
+
+            def decode(argv, **kwargs):
+                calls.append(argv)
+                Path(argv[-1]).write_bytes(b"RIFF")
+                return mock.Mock(returncode=0)
+
+            lease = cache.acquire("ffmpeg", source, "clip", run=decode)
+            self.assertEqual(lease.path.read_bytes(), b"RIFF")
+            self.assertEqual(len(calls), 1)
+            lease.release()
+
+            def empty_decode(argv, **kwargs):
+                Path(argv[-1]).write_bytes(b"")
+                return mock.Mock(returncode=0)
+
+            with self.assertRaises(decoded_audio.EmptyDecodeError):
+                cache.acquire("ffmpeg", source, "clip", run=empty_decode)
+            self.assertFalse(cached.exists())
+            self.assertEqual(list(cache.root.glob("*.partial.wav")), [])
+
     def test_concurrent_callers_decode_once_and_failure_cleans_up(self):
         with tempfile.TemporaryDirectory() as scratch:
             work = Path(scratch)

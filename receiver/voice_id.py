@@ -512,13 +512,38 @@ def enroll_turns(db, turns, person_id: str, now: float | None = None) -> dict:
         reason = "duplicate" if vectors and not accepted else "need_5s"
         return {"enrolled": False, "reason": reason}
     accepted_ids = [vector["id"] for vector in accepted]
+    exemplar = normalize_vector(json.loads(accepted[0]["embedding_json"]))
+    existing = list(db.execute(
+        f"SELECT * FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids,
+    ))
+    # Recovery must not mistake the same evidence for newly learned speech.
+    # Explicit manual replacement clears enrollment first and still takes the
+    # normal path below. Keep the original sample ID and confirmation time.
+    if len(existing) == 1:
+        sample = existing[0]
+        saved_exemplar = normalize_vector(json.loads(sample["embedding_json"]))
+        same_exemplar = saved_exemplar is not None and exemplar is not None and all(
+            math.isclose(left, right, rel_tol=1e-12, abs_tol=1e-12)
+            for left, right in zip(saved_exemplar, exemplar)
+        )
+        unchanged = (
+            sample["person_id"] == person_id
+            and sample["turn_id"] == turns[0]["id"]
+            and sample["vector_id"] == accepted[0]["id"]
+            and sample["source_key"] == accepted[0]["interval_key"]
+            and sample["status"] == "accepted" and not sample["legacy"]
+            and math.isclose(float(sample["duration"]), duration, abs_tol=1e-6)
+            and same_exemplar
+            and all(vector["enrolled"] and vector["person_id"] == person_id for vector in accepted)
+        )
+        if unchanged:
+            return {"enrolled": False, "changed": False, "reason": "unchanged"}
     id_placeholders = ",".join("?" for _ in accepted_ids)
     db.execute(
         f"UPDATE voice_vectors SET enrolled=1, person_id=? WHERE id IN ({id_placeholders})",
         [person_id, *accepted_ids],
     )
     db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
-    exemplar = normalize_vector(json.loads(accepted[0]["embedding_json"]))
     db.execute(
         """INSERT INTO voice_samples
            (id,person_id,turn_id,embedding_json,duration,confirmed_at,vector_id,status,legacy,source_key)
@@ -527,7 +552,7 @@ def enroll_turns(db, turns, person_id: str, now: float | None = None) -> dict:
          accepted[0]["id"], accepted[0]["interval_key"]),
     )
     refresh_tracks(db, _tracks_for_turns(db, turn_ids))
-    return {"enrolled": True, "reason": "accepted", "vectors": len(accepted)}
+    return {"enrolled": True, "changed": True, "reason": "accepted", "vectors": len(accepted)}
 
 
 def _exemplars(db) -> dict[str, list[list[float]]]:
@@ -998,6 +1023,8 @@ def enqueue_unlabeled(db, reason: str) -> int:
 
 def recover_chunk(db, chunk_id: str, now: float | None = None) -> int:
     """Enroll fully confirmed stretches on one recording. Partial stretches are left alone."""
+    if db.execute("SELECT 1 FROM voice_recover_skip WHERE chunk_id=?", (chunk_id,)).fetchone():
+        return 0
     turns = list(db.execute(
         "SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started, ended, id",
         (chunk_id,),

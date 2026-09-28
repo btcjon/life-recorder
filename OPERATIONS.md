@@ -8,6 +8,14 @@ The launch job is `com.browseruse.life-recorder.receiver` in the current user's 
 
 ## Before a restart
 
+Speaker maintenance diagnostics are read-only and aggregate-only:
+
+```sh
+/opt/homebrew/bin/python3 scripts/voice-diagnostics.py --db '/absolute/private/runtime/inbox.sqlite3'
+```
+
+The report contains profile readiness/sample counts, label counts, and queue age/attempt/error-class counts, never transcripts or voice vectors. Background recovery leaves unchanged enrolled samples untouched rather than repeatedly requeuing all unknown recordings. A current human speaker label records the explicit enrollment decision for that recording: legacy recovery will not enroll other stretches in it automatically; each may still be enrolled through an explicit human opt-in. Automatic identity thresholds remain unchanged.
+
 1. Inspect `git status`, the intended commit, and the loaded launch job. Confirm its Python executable, `receiver.py` source path, data directory, port, environment *key names* and listener addresses. Do not dump environment values or pairing files.
 2. Check authenticated and unauthenticated upload `/health` (200 with `viewer: ok`, and 401 respectively). Record the PID, start time, queue/status counts, agent-index schema and generation, event-ID count, keyed/FTS transcript counts, a count-only representative FTS query, and SQLite integrity. Record only a fingerprint of the cursor key, not the key.
 3. Create a dated, mode-0700 backup directory outside Git. Use SQLite's backup API for a consistent `inbox.sqlite3` copy while the service is running; verify `PRAGMA integrity_check` on that copy. Privately copy the currently loaded launch plist and source used by the process. Do not copy or publish credentials into the repository.

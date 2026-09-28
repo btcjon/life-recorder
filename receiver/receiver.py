@@ -894,6 +894,10 @@ class Inbox:
                 voice_id.clear_enrollment(db, turn_ids)
             if use_sample:
                 enrolled = voice_id.enroll_turns(db, matching, person_id)
+            # This current human action has an explicit enrollment choice.
+            # Do not let legacy background recovery override it later. Other
+            # stretches can still be explicitly enrolled through this route.
+            db.execute("INSERT OR IGNORE INTO voice_recover_skip (chunk_id) VALUES (?)", (turn["chunk_id"],))
             voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
             if enrolled.get("enrolled"):
                 voice_id.enqueue_unlabeled(db, "sample")

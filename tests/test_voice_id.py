@@ -1,4 +1,5 @@
 import json
+import random
 import sys
 import tempfile
 import unittest
@@ -265,6 +266,50 @@ class VoiceIdentityTests(unittest.TestCase):
             inbox.speaker_turns(strong)
             with inbox.connect() as db:
                 self.assertEqual(db.execute("SELECT count(*) FROM voice_samples").fetchone()[0], before)
+
+    def test_recovery_is_idempotent_and_finite_queue_drains(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            inbox = Inbox(Path(scratch))
+            person = inbox.create_person("Jon")
+            rng = random.Random(3)
+            embedding = [rng.uniform(-1, 1) for _ in range(256)]
+            chunk, _ = self._tag(inbox, person["id"], embedding, "2026-09-10T12:00:00.000Z")
+            self._tag(inbox, person["id"], embedding, "2026-09-10T12:01:00.000Z")
+            self._open_clip(inbox, _vec(1), "2026-09-10T12:02:00.000Z")
+            with inbox.connect() as db:
+                before = [tuple(r) for r in db.execute("SELECT * FROM voice_samples ORDER BY id")]
+                db.execute("DELETE FROM voice_recover_skip")  # Historical opted-in samples.
+                turns = list(db.execute("SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started,ended,id", (chunk,)))
+                result = voice_id.enroll_turns(db, turns, person["id"])
+                self.assertEqual(result["reason"], "unchanged")
+                self.assertFalse(result["changed"])
+                self.assertEqual(voice_id.recover_chunk(db, chunk), 0)
+                self.assertEqual(voice_id.recover_chunk(db, chunk), 0)
+                self.assertEqual(before, [tuple(r) for r in db.execute("SELECT * FROM voice_samples ORDER BY id")])
+            voice_id.drain_voice_work(inbox, limit=100)
+            with inbox.connect() as db:
+                self.assertEqual(db.execute("SELECT count(*) FROM voice_jobs").fetchone()[0], 0)
+                self.assertEqual(before, [tuple(r) for r in db.execute("SELECT * FROM voice_samples ORDER BY id")])
+
+    def test_no_sample_opt_in_survives_background_recovery(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            inbox = Inbox(Path(scratch))
+            person = inbox.create_person("Jon")
+            chunk = self._open_clip(inbox, _vec(0), "2026-09-10T12:00:00.000Z")
+            with inbox.connect() as db:
+                turn = db.execute("SELECT id FROM speaker_turns WHERE chunk_id=?", (chunk,)).fetchone()[0]
+            self.assertTrue(inbox.label_turn(turn, person["id"], use_sample=False))
+            voice_id.drain_voice_work(inbox, limit=100)
+            with inbox.connect() as db:
+                self.assertEqual(voice_id.recover_chunk(db, chunk), 0)
+                self.assertEqual(db.execute("SELECT count(*) FROM voice_samples").fetchone()[0], 0)
+                self.assertEqual(db.execute("SELECT count(*) FROM voice_vectors WHERE enrolled=1").fetchone()[0], 0)
+            self.assertTrue(inbox.label_turn(turn, person["id"], use_sample=True))
+            replacement = inbox.create_person("Other")
+            self.assertTrue(inbox.label_turn(turn, replacement["id"], use_sample=True))
+            with inbox.connect() as db:
+                rows = list(db.execute("SELECT person_id FROM voice_samples"))
+                self.assertEqual([r[0] for r in rows], [replacement["id"]])
 
     def test_confirmed_stretch_recovers_one_sample(self):
         with tempfile.TemporaryDirectory() as scratch:

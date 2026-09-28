@@ -4,6 +4,16 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-09-28 speaker maintenance repair (deployed)
+
+Source commit `95a19c7` makes unchanged enrollment a no-op, tolerates normalization roundoff, and prevents legacy recovery from overriding a current human sample opt-in decision. Score 0.85, margin 0.10, readiness and unanimity remain unchanged. No schema migration or iOS update.
+
+Grok 4.7 RPC worker stopped at its bounded deadline without edits; lead implemented and verified the repair. Astra reviewed it, caught a floating-point edge case, and accepted the repaired criterion. Targeted 19 and full 231 tests passed, with nonfatal test-fixture warnings; diff check passed. Private SQLite backup integrity passed. A rehearsal drained 348 jobs, preserving exact sample rows and confirmed names.
+
+Restarted the existing launch job (PID 2875 -> 49492). Live voice queue fell 347 -> 63 -> 0 and remained empty on a subsequent check. All 50 samples retained identical voice evidence to the backup; confirmed assignments stayed unchanged. Sample IDs/timestamps changed while the old process was still reenrolling before restart, then stabilized after restart. All 916 processing records remained complete; 25 event IDs, 516 keyed/FTS transcripts, 459 representative FTS matches, schema version 2, generation 129, and cursor-key fingerprint were preserved. SQLite integrity remained OK.
+
+Authenticated upload health returned 200 with viewer OK; unauthenticated health 401. Viewer root/day reads and retained audio HEAD returned 200; unauthenticated remote viewer returned 403. Listener scopes stayed upload `*:8766` and viewer `127.0.0.1:8767`. No fresh phone upload, live machine-credential probe, or rendered-browser check was performed; UI/auth code was not changed. No push. This fixes queue cycling, not the conservative identity rule's measured abstention rate.
+
 ## Current install (verified 2026-09-24)
 
 - Data directory: `~/Library/Application Support/LifeRecorder`

@@ -604,15 +604,6 @@ class PersistenceAndPlaybackTests(unittest.TestCase):
                 self.assertEqual(response.status, 206)
                 self.assertEqual(response.read(), b"RIFF")
                 client.close()
-                from contextlib import nullcontext
-                with mock.patch.object(viewer_mod.playback_audio, "browser_audio", return_value=nullcontext(audio)) as decode:
-                    client = http.client.HTTPConnection(host, port, timeout=5)
-                    client.request("GET", "/v1/events/" + event_id + "/audio?kind=original&playback=pcm",
-                                   headers={**auth, "Range": "bytes=0-3"})
-                    response = client.getresponse()
-                    self.assertEqual((response.status, response.read()), (206, b"RIFF"))
-                    self.assertEqual(decode.call_args.args[0][0]["path"], str(dest))
-                    client.close()
             finally:
                 server.shutdown()
                 server.server_close()

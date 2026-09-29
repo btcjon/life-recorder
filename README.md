@@ -84,8 +84,6 @@ ASR, voice-activity detection, and diarization share one 16 kHz decode of each c
 
 ### Names and badges
 
-Browser clip and original speech-event playback uses temporary 48 kHz mono PCM WAVs, decoding AAC with FFmpeg's fixed-point decoder to avoid observed intermittent decoder dropouts. Two concurrent conversions are allowed; temporary files are private and removed after each response. Retained originals, recognition results, and speaker labels are unchanged. Existing enhanced event audio is a separate derivative and is not repaired by this playback conversion.
-
 In a recording's Transcript view, speaker stretches shorter than one second appear in a single expandable “Brief turns” row. Speaker turns still shows every stretch with playback and identity controls. Recordings containing only brief turns start expanded; opening a brief turn's identity editor also keeps the row expanded. This changes presentation only: audio, transcripts, stored speaker turns, and enrollment rules are preserved.
 
 Automatic naming requires a profile of two accepted samples from two clips and 10 seconds of clean speech. A name is written automatically only when the best cosine score is at least 0.85 and leads the runner-up by at least 0.10. A confirmed name is a human assignment and is not replaced by a later automatic match. Automatic labels do not become enrollment samples. Sidebar badges use stored names only. A confirmed name is solid. Any other stored name is outlined and marked unconfirmed. Anonymous speaker keys are not shown.

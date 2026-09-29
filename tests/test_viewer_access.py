@@ -254,6 +254,22 @@ class ViewerHttpTests(unittest.TestCase):
         self.assertEqual(headers.get("Content-Length"), "10")
         self.assertEqual(headers.get("Accept-Ranges"), "bytes")
 
+    def test_pcm_playback_auth_ranges_and_head(self):
+        from contextlib import nullcontext
+        decoded = self.inbox.root / "synthetic-playback.wav"
+        decoded.write_bytes(b"RIFF123456")
+        path = "/v1/audio/" + self.chunk_id + "?playback=pcm"
+        auth = {"Authorization": "Bearer " + self.token}
+        with mock.patch.object(viewer_mod.playback_audio, "browser_audio", side_effect=lambda *args: nullcontext(decoded)) as decode:
+            self.assertEqual(self.request("GET", path)[0], 401)
+            decode.assert_not_called()
+            status, body, headers = self.request("GET", path, {**auth, "Range": "bytes=0-3"})
+            self.assertEqual((status, body), (206, b"RIFF"))
+            self.assertEqual(headers.get("Content-Type"), "audio/wav")
+            self.assertEqual(self.request("GET", path, {**auth, "Range": "bytes=99-100"})[0], 416)
+            status, body, headers = self.request("HEAD", path, auth)
+            self.assertEqual((status, body, headers.get("Content-Length")), (200, b"", "10"))
+
     def test_remote_js_does_not_use_hash_token(self):
         self.assertIn('const remote = !["127.0.0.1", "localhost"].includes(location.hostname);', viewer_mod.JS)
         self.assertIn("return remote ? {} : { Authorization: \"Bearer \" + token };", viewer_mod.JS)

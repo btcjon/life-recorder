@@ -6,6 +6,7 @@ import hmac
 import json
 import os
 import secrets
+import subprocess
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -18,6 +19,7 @@ from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig, Ver
 from agent_api import http as agent_http
 import event_edits
 import speaker_review
+import playback_audio
 
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
@@ -1159,8 +1161,8 @@ JS = r"""
     } : null;
     const audioPath = !item || !canOriginal ? null : (
       isEvent
-        ? "/v1/events/" + item.id + "/audio?kind=" + (playbackKind === "enhanced" && canEnhanced ? "enhanced" : "original")
-        : "/v1/audio/" + item.id
+        ? "/v1/events/" + item.id + "/audio?kind=" + (playbackKind === "enhanced" && canEnhanced ? "enhanced" : "original") + "&playback=pcm"
+        : "/v1/audio/" + item.id + "?playback=pcm"
     );
     const nextAudioId = audioPath ? ((isEvent ? "event:" : "chunk:") + item.id + ":" + (isEvent ? playbackKind : "original")) : null;
     if (nextAudioId === loadedAudioId) return;
@@ -1711,7 +1713,7 @@ JS = r"""
   }
   function playReviewSpan(item) {
     if (!item || !item.audio_usable) return;
-    const audioPath = "/v1/audio/" + item.chunk_id;
+    const audioPath = "/v1/audio/" + item.chunk_id + "?playback=pcm";
     const nextAudioId = "review:" + item.turn_id;
     const startAt = Number(item.started) || 0;
     const stopAt = Number(item.ended) || 0;
@@ -2195,10 +2197,33 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def _event_audio(self, event_id: str, kind: str, include_body: bool):
         if kind not in ("original", "enhanced"):
             return self._json(400, {"error": "Invalid audio kind"})
+        if kind == "original" and (parse_qs(urlparse(self.path).query).get("playback") or [""])[0] == "pcm":
+            with self._inbox().connect() as db:
+                parts = list(db.execute("""SELECT c.path,e.start_seconds,e.end_seconds FROM
+                    speech_event_chunks e JOIN chunks c ON c.id=e.chunk_id
+                    WHERE e.event_id=? AND c.audio_state='present' ORDER BY c.started,e.start_seconds""", (event_id,)))
+                total = db.execute("SELECT COUNT(*) FROM speech_event_chunks WHERE event_id=?", (event_id,)).fetchone()[0]
+            if not parts or len(parts) != total or any(not Path(p["path"]).is_file() for p in parts):
+                return self._json(404, {"error": "Audio unavailable"})
+            return self._pcm_audio(parts, include_body)
         audio = self._inbox().event_audio_path(event_id, kind)
         if not audio or not audio.is_file():
             return self._json(404, {"error": "Audio unavailable"})
         return self._send_audio(audio, include_body=include_body)
+
+    def _pcm_audio(self, parts, include_body):
+        streaming = False
+        try:
+            with playback_audio.browser_audio(parts, self._inbox().root) as audio:
+                streaming = True
+                return self._send_audio(audio, include_body=include_body)
+        except (BrokenPipeError, ConnectionResetError):
+            return  # Browser cancelled; cleanup still runs, no second response.
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            if streaming:
+                self.close_connection = True
+                return
+            return self._json(503, {"error": "Playback decoding unavailable"})
 
     def _send_audio(self, audio: Path, include_body: bool):
         size = audio.stat().st_size
@@ -2314,6 +2339,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             audio = Path(row["path"])
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
+            if (parse_qs(urlparse(self.path).query).get("playback") or [""])[0] == "pcm":
+                return self._pcm_audio([{"path": str(audio)}], False)
             return self._send_audio(audio, include_body=False)
         if path.startswith("/v1/events/") and path.endswith("/audio"):
             event_id = path[len("/v1/events/"):-len("/audio")]
@@ -2358,6 +2385,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             audio = Path(row["path"])
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
+            if (parse_qs(parsed.query).get("playback") or [""])[0] == "pcm":
+                return self._pcm_audio([{"path": str(audio)}], True)
             return self._send_audio(audio, include_body=True)
         if path.startswith("/v1/events/") and path.endswith("/audio"):
             event_id = path[len("/v1/events/"):-len("/audio")]
@@ -2524,6 +2553,7 @@ def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote
     server.remote_access = remote
     server.access_verifier = AccessVerifier(remote) if remote else None
     server.agent_limiter = agent_http.Limiter()
+    playback_audio.sweep_orphans(inbox.root)
     inbox.viewer_error = None
     inbox.viewer_server = server
     thread = threading.Thread(target=server.serve_forever, daemon=True)

@@ -42,6 +42,8 @@ def browser_audio(parts, root):
             subprocess.run(command, check=True, stdout=subprocess.DEVNULL,
                            stderr=subprocess.DEVNULL, timeout=remaining)
         ffmpeg = shutil.which("ffmpeg")
+        if not ffmpeg and Path("/opt/homebrew/bin/ffmpeg").is_file():
+            ffmpeg = "/opt/homebrew/bin/ffmpeg"
         if not ffmpeg:
             raise RuntimeError("Playback decoder unavailable")
         with tempfile.TemporaryDirectory(prefix="pcm-", dir=scratch_root(root)) as scratch:

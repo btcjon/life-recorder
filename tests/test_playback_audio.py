@@ -22,7 +22,7 @@ class PlaybackTests(unittest.TestCase):
             def run(command, **kwargs):
                 commands.append(command)
                 Path(command[-1]).write_bytes(b"wav")
-            with patch.object(playback_audio.subprocess, "run", side_effect=run), patch.object(playback_audio.shutil, "which", return_value=None), patch.object(playback_audio.Path, "is_file", return_value=True):
+            with patch.object(playback_audio.subprocess, "run", side_effect=run):
                 with playback_audio.browser_audio([{"path": str(source)}], root) as decoded:
                     self.assertTrue(decoded.is_file())
                     self.assertEqual(decoded.parent.stat().st_mode & 0o777, 0o700)

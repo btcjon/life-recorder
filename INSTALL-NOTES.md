@@ -4,6 +4,12 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-09-29 intermittent playback investigation (repair not confirmed)
+
+The selected September28 12:24 capture contains repeated near-silent intervals, also seen in eight earlier captures that morning; first-eight-second checks of 71 retained captures found nine candidates. Later recordings did not show this pattern. Standard FFmpeg AAC and Apple AudioToolbox decoding both exhibit the gaps. Fixed-point AAC initially looked better by floating-point zero counts, but playable 16-bit PCM retained a 180ms silent gap. A representative gap is approximately -96dBFS even with fixed-point decoding: no usable speech was recovered. The attempted browser PCM conversion passed 237 synthetic tests but failed the decisive real-file waveform check and was removed. Do not treat that experiment as a fix or bulk-reprocess recognition data from it.
+
+Code-only rollback restored receiver/tests exactly to their pre-experiment tree (commits `a90efae`, `3d327b2`); unrelated README/TODO work was preserved. Receiver restarted; health 200/401, SQLite integrity OK, event IDs, labels, 50 voice samples and 586 keyed/FTS transcripts matched the immediate pre-rollout baseline. Originals were unchanged. Capture-time cause remains unproven; a fresh phone-side speech recording and comparison are required before changing iOS capture. Existing enhanced derivatives were not modified.
+
 ## 2026-09-29 compact brief speaker turns (deployed)
 
 Source commit `1152c6e` groups sub-second stretches into one expandable Transcript disclosure, preserving all playback and identity controls in Speaker turns. Disclosure state persists across labeling, refresh, and mode changes; Escape restores focus. All-brief recordings start expanded. No stored turns, enrollment rules, or schema changed.

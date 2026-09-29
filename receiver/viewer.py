@@ -308,6 +308,9 @@ aside .event-people { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
 .preview { margin: 4px 0 0; }
 .toolbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 8px 0; }
 .speakers { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0 14px; position: relative; }
+.brief-turns { flex: 1 1 100%; min-width: 0; max-width: 100%; margin: 0; padding: 0; border: 0; }
+.brief-turns > summary { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.brief-turns-pills { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-width: 0; max-width: 100%; margin-top: 8px; }
 .pill { border-radius: 999px; min-height: 30px; padding: 4px 10px; }
 .pill[aria-expanded="true"] { box-shadow: 0 0 0 2px rgba(143,184,178,.18); }
 .pill.active { box-shadow: 0 0 0 2px rgba(143,184,178,.28); }
@@ -445,6 +448,7 @@ JS = r"""
   let playbackKind = "original";
   let detailMode = "transcript";
   let openIdentityKey = null;
+  const briefTurnsOpen = new Map();
   let identityDraft = null;
   let identityMode = "list";
   let createdPersonId = null;
@@ -735,6 +739,38 @@ JS = r"""
       });
     }
     return groups;
+  }
+  function briefStretch(group) {
+    const bounds = groupBounds(group);
+    const duration = bounds.end - bounds.start;
+    return Number.isFinite(duration) && duration > 0 && duration < 1;
+  }
+  function briefDisclosureLabel(count) {
+    return count === 1 ? "1 brief turn \u00b7 under 1s" : count + " brief turns \u00b7 under 1s each";
+  }
+  function placeTranscriptSpeakers(parent, groups) {
+    const brief = groups.filter(briefStretch);
+    for (const group of groups) {
+      if (!briefStretch(group)) parent.appendChild(group.identityAnchor);
+    }
+    if (brief.length) {
+      const details = document.createElement("details");
+      details.className = "brief-turns";
+      const recordingId = groups[0].chunk.id;
+      const wasOpen = briefTurnsOpen.has(recordingId) ? briefTurnsOpen.get(recordingId) : brief.length === groups.length;
+      details.open = wasOpen || brief.some((group) => openIdentityKey === group.key);
+      details.addEventListener("toggle", () => {
+        if (details.isConnected) briefTurnsOpen.set(recordingId, details.open);
+      });
+      const summary = document.createElement("summary");
+      summary.textContent = briefDisclosureLabel(brief.length);
+      details.appendChild(summary);
+      const body = document.createElement("div");
+      body.className = "brief-turns-pills";
+      for (const group of brief) body.appendChild(group.identityAnchor);
+      details.appendChild(body);
+      parent.appendChild(details);
+    }
   }
 
   function updateCardPlayback() {
@@ -1542,10 +1578,10 @@ JS = r"""
         anchor.appendChild(editor);
       }
       group.identityAnchor = anchor;
-      speakers.appendChild(anchor);
     }
     pane.appendChild(modes);
     if (detailMode === "transcript") {
+      placeTranscriptSpeakers(speakers, groups);
       pane.appendChild(speakers);
       const body = document.createElement("p");
       body.textContent = chunk.transcript || "No transcript yet.";

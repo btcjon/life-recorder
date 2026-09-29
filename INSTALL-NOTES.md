@@ -4,6 +4,12 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-09-29 compact brief speaker turns (deployed)
+
+Source commit `1152c6e` groups sub-second stretches into one expandable Transcript disclosure, preserving all playback and identity controls in Speaker turns. Disclosure state persists across labeling, refresh, and mode changes; Escape restores focus. All-brief recordings start expanded. No stored turns, enrollment rules, or schema changed.
+
+Desktop/mobile synthetic browser regression and the updated full suite passed (232 tests); staged diff check passed. A consistent private SQLite/source/plist backup preceded restart of the existing launch job. New viewer PID 45492 listens on loopback 8767 and serves the updated JavaScript. Authenticated upload health returned 200 with viewer OK; unauthenticated returned 401. SQLite integrity, event IDs, confirmed labels, 50 voice samples, 586 keyed/FTS transcripts, index generation 204, and cursor-key fingerprint matched baseline. No new error-log entries. Live upload health used the LAN interface because an unrelated loopback-only process also occupies 8766; it was not modified. Fresh phone upload and a rendered remote production browser session were not exercised in this rollout.
+
 ## 2026-09-28 speaker maintenance repair (deployed)
 
 Source commit `95a19c7` makes unchanged enrollment a no-op, tolerates normalization roundoff, and prevents legacy recovery from overriding a current human sample opt-in decision. Score 0.85, margin 0.10, readiness and unanimity remain unchanged. No schema migration or iOS update.

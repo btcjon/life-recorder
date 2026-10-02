@@ -4,6 +4,28 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-02 agent retrieval evidence (source implemented, deployment blocked)
+
+### Later October 2: authorized isolated rebuild preparation
+
+User explicitly authorized a fresh receiver and iPhone re-pairing after the recovery search. A separate private `LifeRecorder-Rebuilt-20261002` directory has fresh credentials, certificate, database and Python environment. `LifeRecorder-Recovery-20261002` preserves the incomplete original runtime, an integrity-checked consistent SQLite copy, old launch plist/source, and five hash-verified recovered WAVs outside automatic retention. The original runtime is untouched. This does not recover historical identities or transcripts.
+
+Parakeet v3 models were restored into the new runtime and correctly transcribed the public JFK fixture. Two consecutive database initializations preserved agent state and integrity. The prepared configuration preserves upload port 8766, loopback viewer port 8767, and existing Cloudflare host/team/audience/agent allowlist. Remote summaries and missing DeepFilterNet enhancement are explicitly disabled during recovery; original playback, local transcription, VAD and diarization remain configured. Existing Cloudflare tunnel is running; unauthenticated public viewer returns 302. Deployment and physical phone proof must be recorded separately after successful checks.
+
+Search now returns match-centered evidence with clip identifiers, clip-start timestamps, exact Unicode code-point offsets and revision-bound read anchors. Anchored reads preserve context and lossless continuation within the existing response budget. People remain explicitly event/clip associations, not claimed passage speakers. Ranking, authentication, database schema and location permissions are unchanged.
+
+The offline 60-case synthetic evaluation against `eaf160f` preserves the same 45 retrieved cases and ranking/filter results; matched previews contain the hit in all 45 cases versus zero before. The 15 natural-language/paraphrase misses remain for later retrieval work. This is not a production relevance or latency benchmark.
+
+Verification: `/opt/homebrew/bin/python3 -m unittest discover -s tests -p 'test_*.py' -q` passed all 237 tests, including response-budget shrinking, Unicode offsets, cross-clip continuation and stale/changed anchors. `git diff --check` passed. Astra accepted the focused edge-case review. Test output included a synthetic JWT key-length warning and an unclosed SQLite ResourceWarning; neither failed the suite.
+
+Live deployment is blocked on this Mac: the installed receiver launch job reports `spawn scheduled`, last exit `78: EX_CONFIG`. Its configured `viewer-venv/bin/python` and `viewer.token`/`receiver.token` are missing under the private runtime directory. No listener was found on port 8767. Existing database and logs remain present. No credentials were recreated, recording data changed, or service restart attempted. Restore the expected runtime and existing credentials, then follow OPERATIONS.md backup/restart and authenticated endpoint checks before claiming rollout.
+
+The earlier intermittent playback issue remains separately unresolved; this change does not fix or diagnose audio playback.
+
+October 2 recovery follow-up: read-only inspection found the current 12 KiB database contains only `event_summaries` (integrity check passes), with no `chunks`, transcript index or people tables. The TLS certificate/key and enhancement executable are also absent. The receiver remains `spawn failed` / `EX_CONFIG`, with no listener found on 8766 or 8767. This is an incomplete runtime, not merely a missing Python dependency.
+
+The attached SuperDuper Backup contains the same incomplete LifeRecorder directory. Mounted local Time Machine snapshots from October 1 at 11:44 and 13:03 also have a 12 KiB database and lack the receiver token/key. The interrupted/in-progress external Time Machine copies inspected did not contain the expected LifeRecorder directory; `tmutil listbackups` reported no completed backups for this host. These checks do not establish that no older recovery source exists. No database, credentials, pairing or service configuration was changed. Recovery needs a known-good earlier runtime backup, or an explicitly chosen fresh installation with phone re-pairing; a fresh installation cannot recover the missing history.
+
 ## 2026-09-29 intermittent playback investigation (repair not confirmed)
 
 The selected September28 12:24 capture contains repeated near-silent intervals, also seen in eight earlier captures that morning; first-eight-second checks of 71 retained captures found nine candidates. Later recordings did not show this pattern. Standard FFmpeg AAC and Apple AudioToolbox decoding both exhibit the gaps. Fixed-point AAC initially looked better by floating-point zero counts, but playable 16-bit PCM retained a 180ms silent gap. A representative gap is approximately -96dBFS even with fixed-point decoding: no usable speech was recovered. The attempted browser PCM conversion passed 237 synthetic tests but failed the decisive real-file waveform check and was removed. Do not treat that experiment as a fix or bulk-reprocess recognition data from it.

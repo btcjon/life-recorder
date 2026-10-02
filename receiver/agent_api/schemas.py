@@ -8,7 +8,7 @@ from agent_api.auth import reject_unknown_fields
 from agent_api.errors import AgentError
 
 SEARCH_FIELDS = {"query", "from", "to", "person", "include_unconfirmed", "limit", "cursor"}
-READ_FIELDS = {"mode", "include_unconfirmed", "max_chars", "cursor"}
+READ_FIELDS = {"mode", "include_unconfirmed", "max_chars", "cursor", "anchor", "context_before"}
 MAX_BODY_BYTES = 16 * 1024
 
 
@@ -89,17 +89,32 @@ def parse_read(body: dict) -> dict:
         "include_unconfirmed": False,
         "max_chars": 2000 if mode == "transcript" else None,
         "cursor": None,
+        "anchor": None,
+        "context_before": 160,
     }
     if "include_unconfirmed" in body:
         parsed["include_unconfirmed"] = _bool(body["include_unconfirmed"], "include_unconfirmed")
     if mode == "overview":
-        if "max_chars" in body or "cursor" in body:
-            raise AgentError(400, "invalid_input", "overview does not accept max_chars or cursor.")
+        if any(field in body for field in ("max_chars", "cursor", "anchor", "context_before")):
+            raise AgentError(400, "invalid_input", "overview does not accept paging or anchor fields.")
         return parsed
     if "max_chars" in body:
         parsed["max_chars"] = _int(body["max_chars"], "max_chars", 1, 4000)
     if "cursor" in body and body["cursor"] is not None:
         parsed["cursor"] = _text(body["cursor"], "cursor")
+    if "anchor" in body:
+        anchor = body["anchor"]
+        if not isinstance(anchor, dict) or set(anchor) != {"chunk_id", "offset", "revision"}:
+            raise AgentError(400, "invalid_input", "anchor requires chunk_id, offset, and revision.")
+        parsed["anchor"] = {
+            "chunk_id": _text(anchor["chunk_id"], "chunk_id"),
+            "offset": _int(anchor["offset"], "offset", 0, 1000000000),
+            "revision": _int(anchor["revision"], "revision", 1, 1000000000),
+        }
+    if "context_before" in body:
+        parsed["context_before"] = _int(body["context_before"], "context_before", 0, 1000)
+        if not parsed["anchor"]:
+            raise AgentError(400, "invalid_input", "context_before requires an anchor.")
     return parsed
 
 

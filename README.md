@@ -4,6 +4,8 @@ A native iPhone recorder and private Mac receiver. The iPhone records approximat
 
 The loopback-only Mac viewer supports transcript search, retained-audio playback, time-grouped events, speaker review, and manual speaker naming. Current behavior is [Architecture](#architecture). See [OPERATIONS.md](OPERATIONS.md) for safe restart and recovery; [INSTALL-NOTES.md](INSTALL-NOTES.md) is a dated setup journal, not the source of truth. Contributors should also read [AGENTS.md](AGENTS.md).
 
+Future work is tracked in [TODO.md](TODO.md); planned items are not current capabilities.
+
 ## Requirements
 
 - macOS with Xcode and an Apple developer account capable of installing a development build on the iPhone
@@ -101,6 +103,12 @@ A person can save a title and explicit first and last clip for a group. That edi
 Summaries stay off unless the receiver process has `LIFE_RECORDER_REMOTE_SUMMARIES=1`. One background worker handles one unchanged event at a time, newest first, after 120 seconds without a change to that event. The transcript goes to the local `grok` command on standard input, not in the process arguments. A stored summary is at most two sentences and 16 words, so it fits the two-line event card. Transcript text over the size budget is sampled from the beginning, middle, and end and labeled a partial summary. The cache key changes when membership, order, transcript text, or the prompt changes. A speaker-name change does not invalidate it. A failure retries after 15 minutes and does not block the next event. The day request only reads the cache. Whether this Mac has the flag set is recorded in `INSTALL-NOTES.md`, not here.
 
 ### Agent search
+
+Search results include `match`: an exact passage, its clip ID and clip-start timestamp, and half-open `start_offset`/`end_offset` measured in Unicode code points (not bytes or audio seconds). `match.anchor` can open that passage with `POST /v1/events/{id}/read` using `{"mode":"transcript","anchor":{...},"context_before":160,"max_chars":2000}`. Copy the returned anchor unchanged. Continue by sending the same anchor, context and size plus `next_cursor` as `cursor`. Changed event revisions return 409; invalid clip membership or offsets return 400. Context is bounded within the matched clip; pagination then continues through subsequent clips. Every returned excerpt carries exact offsets.
+
+`people` and legacy `speaker` fields describe event/clip associations, not attribution of the quoted words. The response marks passage `attribution` as `unknown`; matching names must not be presented as proof of who spoke the excerpt. Clip-start timestamps are not word timings. Existing literal ranking and time/person filters are unchanged.
+
+Run `python3 scripts/evaluate-agent-retrieval.py --baseline-ref eaf160f` for the synthetic 60-case comparison. The first comparison preserved 45 literal hits and the 15 known natural-language/paraphrase misses; match visibility improved from 0 to 45 of those literal hits. This measures excerpt usefulness, not general search accuracy or live remote performance.
 
 Approved agents call `https://lr.genr8ive.ai`. They send `CF-Access-Client-Id` and `CF-Access-Client-Secret` to Cloudflare. The viewer only trusts the `Cf-Access-Jwt-Assertion` Cloudflare adds, and only when that token's `common_name` is listed in `LIFE_RECORDER_AGENT_CLIENT_IDS`. That credential can `POST /v1/search` and `POST /v1/events/{id}/read`. It cannot open a day, play audio, or change anything. Search text goes in the JSON body. Results are short. Exact transcript text is a separate paged read. The global skill `life-recorder` is the agent procedure. An empty allowlist means no agent access.
 

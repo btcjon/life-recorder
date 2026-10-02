@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+import uuid
 from datetime import datetime, timezone
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
@@ -130,11 +131,36 @@ def _dumps(payload: dict) -> bytes:
     return json.dumps(payload).encode()
 
 
+def _evidence(item: dict, width: int = 480) -> dict:
+    text = item["preview"]
+    hit = item["match_offset"]
+    start = max(0, hit - width // 3)
+    end = min(len(text), start + width)
+    return {
+        "chunk_id": item["chunk_id"], "start": _show(item["chunk_start"]),
+        "text": text[start:end], "start_offset": start, "end_offset": end,
+        "offset_unit": "unicode_code_points", "attribution": "unknown",
+        "anchor": {"chunk_id": item["chunk_id"], "offset": hit,
+                   "revision": item["revision"]},
+    }
+
+
+def _preview(evidence: dict) -> str:
+    words = list(re.finditer(r"\S+", evidence["text"]))
+    if not words:
+        return ""
+    hit = evidence["anchor"]["offset"] - evidence["start_offset"]
+    index = next((i for i, word in enumerate(words) if word.end() > hit), 0)
+    start = max(0, index - 20)
+    return " ".join(word.group() for word in words[start:start + 60])
+
+
 def search_events(db_path, body: dict) -> dict:
     request = schemas.parse_search(body)
     tokens = _tokens(request["query"])
     db = open_read(db_path)
     try:
+        db.execute("BEGIN")
         _ready(db)
         current = generation(db)
         key = cursor_key(db)
@@ -168,11 +194,14 @@ def search_events(db_path, body: dict) -> dict:
         more = ordered[start + request["limit"]:start + request["limit"] + 1]
         events = []
         for item in page:
+            evidence = _evidence(item)
             events.append({
                 "id": item["id"],
                 "start": _show(item["start"]),
                 "end": _show(item["end"]),
-                "preview": _words(item["preview"], 60),
+                "preview": _preview(evidence),
+                "match": evidence,
+                "people_scope": "event_associations",
                 "people": item["people"],
             })
         next_cursor = None
@@ -184,11 +213,12 @@ def search_events(db_path, body: dict) -> dict:
                 "key": list(page[-1]["sort"]),
             })
         payload = {"events": events, "next_cursor": next_cursor}
-        words = 60
-        while len(_dumps(payload)) > RESPONSE_LIMIT and words > 0:
-            words -= 1
+        width = 480
+        while len(_dumps(payload)) > RESPONSE_LIMIT and width > 0:
+            width //= 2
             for event, item in zip(payload["events"], page):
-                event["preview"] = _words(item["preview"], words)
+                event["match"] = _evidence(item, width)
+                event["preview"] = _preview(event["match"])
             payload["next_cursor"] = next_cursor
         if len(_dumps(payload)) > RESPONSE_LIMIT:
             raise AgentError(503, "unavailable", "Search is unavailable.")
@@ -199,27 +229,33 @@ def search_events(db_path, body: dict) -> dict:
         db.close()
 
 
-def _matched_chunks(db, tokens: list[str]) -> dict[str, tuple[float, str, str]]:
-    """Return chunk id -> (bm25, started, transcript) for tokens that hit the index."""
+def _matched_chunks(db, tokens: list[str]) -> dict[str, tuple[float, str, str, int]]:
+    """Return chunk id -> (bm25, started, transcript, match offset)."""
     match = " AND ".join('"' + token.replace('"', '""') + '"' for token in tokens)
+    marker = "lr-hit-" + uuid.uuid4().hex
     try:
         rows = db.execute(
             """SELECT t.chunk_id, bm25(agent_transcript_fts) AS score,
-                      c.started, COALESCE(c.transcript, '') AS transcript
+                      c.started, COALESCE(c.transcript, '') AS transcript,
+                      t.body AS indexed_text, highlight(agent_transcript_fts, 0, ?, '') AS highlighted
                FROM agent_transcript_fts
                JOIN agent_transcripts t ON t.rowid = agent_transcript_fts.rowid
                JOIN chunks c ON c.id = t.chunk_id
                WHERE agent_transcript_fts MATCH ?""",
-            (match,),
+            (marker, match),
         ).fetchall()
     except sqlite3.Error as error:
         raise AgentError(503, "unavailable", "Search is unavailable.") from error
-    found: dict[str, tuple[float, str, str]] = {}
+    found: dict[str, tuple[float, str, str, int]] = {}
     for row in rows:
+        # Offsets must refer to the exact indexed source, never a stale transcript.
+        if row["indexed_text"] != row["transcript"] or marker in row["transcript"]:
+            raise AgentError(503, "unavailable", "Search evidence is updating. Try again.")
         score = float(row["score"])
         previous = found.get(row["chunk_id"])
         if previous is None or score < previous[0]:
-            found[row["chunk_id"]] = (score, row["started"], row["transcript"] or "")
+            found[row["chunk_id"]] = (score, row["started"], row["transcript"] or "",
+                                      max(0, row["highlighted"].find(marker)))
     return found
 
 
@@ -289,6 +325,7 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
             "start": stamp or datetime.max.replace(tzinfo=timezone.utc),
             "transcript": row["transcript"] or "",
             "score": matched.get(chunk_id, (0.0,))[0],
+            "match_offset": matched[chunk_id][3] if tokens else 0,
         })
     event_ids = list(grouped)
     if not event_ids:
@@ -296,7 +333,7 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
     events = {
         row["id"]: row for row in _query_in(
             db,
-            "SELECT id, start_at, end_at FROM agent_events WHERE tombstoned=0 AND id IN ({placeholders})",
+            "SELECT id, start_at, end_at, revision FROM agent_events WHERE tombstoned=0 AND id IN ({placeholders})",
             event_ids,
         )
     }
@@ -314,6 +351,7 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
             continue
         best = min(item["score"] for item in bucket["chunks"])
         earliest = min(bucket["chunks"], key=lambda item: (item["start"], item["id"]))
+        relevant = min(bucket["chunks"], key=lambda item: (item["score"], item["start"], item["id"]))
         start = _stamp(event["start_at"]) or earliest["start"]
         end = _stamp(event["end_at"])
         if tokens:
@@ -324,7 +362,9 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
             "id": event_id,
             "start": start,
             "end": end,
-            "preview": earliest["transcript"],
+            "preview": relevant["transcript"],
+            "chunk_id": relevant["id"], "chunk_start": relevant["start"],
+            "match_offset": relevant["match_offset"], "revision": event["revision"],
             "people": _people(db, member_ids.get(event_id, []), request["include_unconfirmed"]),
             "sort": sort,
         })

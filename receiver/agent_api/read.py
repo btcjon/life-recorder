@@ -55,6 +55,11 @@ def _slice(pieces: list[dict], start_index: int, start_offset: int, budget: int)
             "chunk_id": piece["chunk_id"],
             "start": piece["start"],
             "speaker": piece["speaker"],
+            "speaker_scope": "clip_associations",
+            "attribution": "unknown",
+            "start_offset": offset,
+            "end_offset": offset + len(take),
+            "offset_unit": "unicode_code_points",
             "text": take,
         })
         remaining -= len(take)
@@ -75,6 +80,7 @@ def read_event(db_path, event_id: str, body: dict) -> dict:
     request = schemas.parse_read(body)
     db = open_read(db_path)
     try:
+        db.execute("BEGIN")
         event = canonical_event(db, event_id)
         if event is None:
             raise AgentError(404, "not_found", "That event was not found.")
@@ -85,9 +91,20 @@ def read_event(db_path, event_id: str, body: dict) -> dict:
             "mode": request["mode"],
             "include_unconfirmed": request["include_unconfirmed"],
             "max_chars": request["max_chars"],
+            "anchor": request["anchor"],
+            "context_before": request["context_before"],
         })
         start_index = 0
         start_offset = 0
+        if request["anchor"]:
+            anchor = request["anchor"]
+            if anchor["revision"] != event["revision"]:
+                raise AgentError(409, "stale_cursor", "The event changed. Search again.")
+            indexes = [i for i, piece in enumerate(pieces) if piece["chunk_id"] == anchor["chunk_id"]]
+            if not indexes or anchor["offset"] >= len(pieces[indexes[0]]["text"]):
+                raise AgentError(400, "invalid_input", "Anchor is outside this event's transcript.")
+            start_index = indexes[0]
+            start_offset = max(0, anchor["offset"] - min(request["context_before"], request["max_chars"] - 1))
         if request["cursor"]:
             payload = cursors.decode(key, request["cursor"])
             if payload.get("kind") != "read" or payload.get("fingerprint") != finger or payload.get("event_id") != event["id"]:
@@ -120,6 +137,7 @@ def read_event(db_path, event_id: str, body: dict) -> dict:
                 excerpts, _, _, _ = _slice(pieces[:3], 0, 0, 1)
                 while excerpts and len(_dumps({**payload, "excerpts": excerpts, "truncated": True})) > RESPONSE_LIMIT:
                     excerpts[-1]["text"] = excerpts[-1]["text"][:-1]
+                    excerpts[-1]["end_offset"] -= 1
                     if not excerpts[-1]["text"]:
                         excerpts.pop()
                 payload["excerpts"] = excerpts
@@ -155,6 +173,7 @@ def read_event(db_path, event_id: str, body: dict) -> dict:
                     raise AgentError(503, "unavailable", "Search is unavailable.")
                 continue
             last["text"] = last["text"][:-1]
+            last["end_offset"] -= 1
             payload["truncated"] = True
             # The cursor must resume at the first omitted character.
             consumed = sum(len(item["text"]) for item in payload["excerpts"])

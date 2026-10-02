@@ -6,6 +6,56 @@ Two statements later in this journal described the 2026-09-19 install and are no
 
 ## 2026-10-02 roadmap source and receiver rollout
 
+### Completion source and topic rollout, 16:41 UTC
+
+Supersedes the earlier topic-route and XCTest gaps below. Final receiver suite:
+355 tests passed. All 45 native Simulator tests passed, none skipped; official
+xcresult independently reports Passed and xcodebuild exited zero. Pinned HTTPS
+upload used an isolated synthetic loopback receiver, with exactly one durable
+receipt and matching audio SHA. After tests finished, its owned stalled simctl
+diagnostic child was stopped so Xcode could finalize. No fixture contacted the
+live receiver or physical phone. A native main-thread runtime warning remains.
+
+The local hybrid experiment evaluated the existing Apple English sentence model
+without downloading a model or using cloud embeddings. Held-out recall/precision
+0.881 improved on lexical 0.8333 but missed recall 0.90. Responses stayed below
+16 KiB; unsupported attributions were zero. Production ranking is unchanged.
+Anonymous speaker proposals now persist versioned similarity/support evidence;
+reconciliation refreshes it and stale reads hide it. No real consented evaluation
+or enrolled profiles exist, so live proposals remain off.
+
+The topic adapter uses the existing private Pi xAI credentials and the configured
+`grok-4.7` Responses route. Security review found a concurrent credential-writer
+race; adapter-managed refresh was removed. Credentials are read-only, and expired
+OAuth fails closed until Pi renews it. Requests send only bounded transcript text
+and clip IDs, register no tools, and set `store:false`. Per-job provenance checks
+the provider-reported effective model and code/config/input/source fingerprints.
+No audio/location was disclosed and no model/provider fallback was selected.
+
+Before restart, a fresh private consistent safety copy preserved all 55 complete
+clips. Two migration rehearsals passed with a no-op second pass, integrity OK,
+event IDs/cursor preserved, 52 keyed/FTS transcripts and 52 source citations.
+The existing receiver job was booted out/bootstrap reloaded to apply topic
+environment keys; both commands succeeded. No setup, database restore, pairing
+change, permission change or phone reinstall occurred in this later rollout.
+
+Observed PID 53854 and source `9f56b7f73a98f3fac983be5bb8a9f36410ad7e46`.
+Authenticated health 200/viewer OK, unauthenticated 401; all 55 clips complete,
+integrity OK, event/cursor continuity and 52/52 indexes preserved. Listeners are
+`*:8766` and `127.0.0.1:8767`; original playback range returned 206. One live
+topic job completed with 10 suggestions and independently verified provider
+provenance. Machine search/citation read returned 200 within the response budget;
+location and nine human/audio/mutation probes remain denied. Remote unauthenticated
+access returned 302. The receiver error log remains empty.
+
+Original playback remains default, enhancement selectable only, background/motion
+off, and quiet suppression inactive. Shadow evidence covers one day with no holds;
+it cannot pass the seven-day gate. Cellular recovery, physical control inspection,
+consented voice evaluation, matched four-hour battery trials and twelve listening
+pairs still need human evidence. The goal is not fully accepted on source checks.
+This later journal commit changes documentation only; receiver/iOS code matches
+the observed running source. Approved origin push/readback is recorded below.
+
 ### Later phone update, 15:42 UTC
 
 After the user signed into Xcode, the physical-device build and strict code-signature

@@ -6,7 +6,14 @@ This is the current maintenance runbook for the Mac installation. [README.md](RE
 
 The launch job is `com.browseruse.life-recorder.receiver` in the current user's GUI domain. The private data directory is `~/Library/Application Support/LifeRecorder`; the active job must be inspected rather than inferred from this example. HTTPS upload listens on port 8766 and requires the private receiver bearer token. The viewer listens on `127.0.0.1:8767`; remote access, if configured, is Cloudflare Access to that viewer only. `agent_api_state.schema_version` is the agent-index schema; it is not SQLite's `PRAGMA user_version`.
 
-After the authorized October 2 rebuild, the active runtime is `~/Library/Application Support/LifeRecorder-Rebuilt-20261002`. The original `LifeRecorder` directory remains untouched; `LifeRecorder-Recovery-20261002` holds preservation copies and five recovered WAVs outside retention. The old incomplete runtime is **not a working rollback target**. On failure, stop the rebuilt job and preserve its database and every newly accepted upload; never replace them with the old incomplete database. Inspect the loaded job before using any path. Remote summaries and topic analysis remain disabled. Selectable local noise enhancement was restored during the later October 2 roadmap rollout; original playback remains the default. See INSTALL-NOTES.md for observed state.
+After the authorized October 2 rebuild, the active runtime is `~/Library/Application Support/LifeRecorder-Rebuilt-20261002`. The original `LifeRecorder` directory remains untouched; `LifeRecorder-Recovery-20261002` holds preservation copies and five recovered WAVs outside retention. The old incomplete runtime is **not a working rollback target**. On failure, stop the rebuilt job and preserve its database and every newly accepted upload; never replace them with the old incomplete database. Inspect the loaded job before using any path. Remote summaries remain disabled. Transcript-only topic analysis was separately enabled through the existing xAI route during the later completion rollout; missing/expired credentials fail closed. Selectable local noise enhancement was restored during the October 2 roadmap rollout; original playback remains the default. See INSTALL-NOTES.md for observed state.
+
+Topic credentials are read-only to this receiver. Renew expired OAuth through Pi's
+existing account flow; do not add a separate refresh writer to its shared auth
+file. Inspect sanitized topic health and per-job model/source/code fingerprints.
+Disabling `LIFE_RECORDER_TOPIC_ANALYSIS` stops future requests without deleting
+source clips or silently accepting existing suggestions. Plist environment changes
+need reload of this same job; preserve the loaded configuration first.
 
 ## Before a restart
 

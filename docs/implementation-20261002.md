@@ -83,9 +83,9 @@ and all recognition/enrollment input.
 - Consented enrollment and held-out recordings covering noise, distance, brief
   and overlapping speech and unknown people; report correct/false/abstained
   outcomes per pseudonymous identity and condition. Clustering suggestions remain off.
-- Live topic-job provenance after source rollout; OAuth renewal remains owned by
-  Pi. No replacement model/provider was selected. Manual/local timeline works
-  even when authentication or cloud analysis is unavailable.
+- OAuth renewal remains owned by Pi; unavailable credentials disable optional
+  requests. Live topic-job provenance passed after rollout, with no replacement
+  model/provider. Manual/local timeline works without cloud analysis.
 - Matched four-hour background battery runs: no audio loss/upload regression and
   at most three additional battery percentage points. The trial remains opt-in.
 - Twelve level-matched original/enhanced pairs and user listening approval before

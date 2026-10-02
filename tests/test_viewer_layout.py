@@ -105,7 +105,7 @@ class ViewerDesktopLayoutTests(unittest.TestCase):
     def test_desktop_css_locks_viewport_height(self):
         desktop = viewer_mod.CSS.split("@media (min-width: 761px)", 1)[1]
         self.assertIn("html, body { height: 100%; overflow: hidden; }", desktop)
-        self.assertIn("#library, #people-view, #review-view { flex: 1 1 auto; min-height: 0; }", desktop)
+        self.assertIn("#library, #people-view, #review-view, #context-view { flex: 1 1 auto; min-height: 0; }", desktop)
         self.assertIn("overflow: auto; min-height: 0", viewer_mod.CSS)
 
 

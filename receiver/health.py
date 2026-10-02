@@ -63,6 +63,8 @@ def snapshot(inbox, device_id=None, now=None):
         stages["summaries"] = {"enabled": inbox.health_stages.get("summaries"), "counts": {
             r[0]: r[1] for r in db.execute("SELECT status,count(*) FROM event_summaries GROUP BY status")
         } if "event_summaries" in names else {}}
+        stages['topics'] = {'enabled': inbox.health_stages.get('topics'),
+                            'status': getattr(inbox, 'topic_status', {'state': 'not_checked'})}
         index = db.execute("SELECT schema_version,search_generation FROM agent_api_state WHERE id=1").fetchone()
         result["agent_index"] = {"schema_version": index[0], "generation": index[1],
                                  "last_reconciled_at": inbox.last_index_reconciled_at}

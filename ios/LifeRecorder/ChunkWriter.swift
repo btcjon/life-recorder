@@ -14,10 +14,13 @@ final class ChunkWriter: @unchecked Sendable {
     private var probe = WindowAccumulator()
     private let onChunk: () -> Void
     private let onError: (String) -> Void
+    private let locationObservationID: (Date) -> String?
 
-    init(onChunk: @escaping () -> Void, onError: @escaping (String) -> Void) {
+    init(onChunk: @escaping () -> Void, onError: @escaping (String) -> Void,
+         locationObservationID: @escaping (Date) -> String? = { _ in nil }) {
         self.onChunk = onChunk
         self.onError = onError
+        self.locationObservationID = locationObservationID
     }
 
     func consume(_ input: AVAudioPCMBuffer) {
@@ -53,10 +56,12 @@ final class ChunkWriter: @unchecked Sendable {
                 userInfo: [NSLocalizedDescriptionKey: "Storage is nearly full. Pending audio is preserved; free space to resume."])
         }
         sampleRate = format.sampleRate
-        let next = RecordingJournal(id: UUID(), startedAt: startedAt.addingTimeInterval(Double(totalFrames) / sampleRate))
+        let chunkStart = startedAt.addingTimeInterval(Double(totalFrames) / sampleRate)
+        let next = RecordingJournal(id: UUID(), startedAt: chunkStart,
+                                    locationObservationID: locationObservationID(chunkStart))
         let name = next.id.uuidString.lowercased()
         let journalURL = QueueStore.directory.appendingPathComponent(name + ".recording.json")
-        try JSONEncoder().encode(next).write(to: journalURL, options: .atomic)
+        try JSONEncoder().encode(next).write(to: journalURL, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
         let outputURL = QueueStore.directory.appendingPathComponent(name + ".m4a")
         let voiceBitRate = format.sampleRate >= 32000 ? 64000 : 32000
         file = try AVAudioFile(forWriting: outputURL, settings: [

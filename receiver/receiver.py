@@ -36,6 +36,12 @@ import diarization as diarization_mod
 import vad as vad_mod
 import voice_id
 import health as health_mod
+import speaker_identity
+import timeline
+import topic_analysis
+import boundary_suggestions
+import place_context
+from agent_api.errors import AgentError
 
 MAX_UPLOAD = 32 * 1024 * 1024
 SESSION_GAP_SECONDS = 15 * 60
@@ -179,6 +185,10 @@ class Inbox:
                 attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
                 error TEXT, received REAL NOT NULL)""")
             meetings_mod.migrate_schema(db)
+            speaker_identity.migrate(db)
+            topic_analysis.ensure_schema(db)
+            place_context.ensure_schema(db)
+            place_context.cleanup(db)
             self._reconcile_index(db)
         # Recover a crash after a transcript transaction but before Markdown refresh.
         self.export()
@@ -214,13 +224,20 @@ class Inbox:
 
     def _reconcile_index(self, db, touched=None):
         agent_api.reconcile(db, self._blocks_for(db), touched)
+        db.execute('SAVEPOINT optional_boundary_refresh')
+        try:
+            boundary_suggestions.refresh(db)
+        except Exception:
+            db.execute('ROLLBACK TO optional_boundary_refresh')
+        finally:
+            db.execute('RELEASE optional_boundary_refresh')
         self._index_reconciliation_times[db] = time.time()
 
     def health_snapshot(self, device_id=None, now=None):
         return health_mod.snapshot(self, device_id=device_id, now=now)
 
     def accept(self, tmp: Path, chunk_id: str, digest: str, device: str,
-               started: str, duration: float, activity=None):
+               started: str, duration: float, activity=None, observation_id=None):
         with self.lock:
             old = self.receipt(chunk_id)
             if old:
@@ -246,6 +263,15 @@ class Inbox:
                      None if not activity else activity["rms_dbfs"],
                      None if not activity else activity["peak_dbfs"],
                      None if not activity else activity["reason"]))
+                # Optional context cannot roll back a durably accepted recording.
+                if observation_id:
+                    db.execute('SAVEPOINT optional_place_binding')
+                    try:
+                        place_context.bind_clip(db, chunk_id, observation_id)
+                    except Exception:
+                        db.execute('ROLLBACK TO optional_place_binding')
+                    finally:
+                        db.execute('RELEASE optional_place_binding')
             diarization_mod.refresh_decoded_pins(self)
             return True
 
@@ -286,6 +312,7 @@ class Inbox:
     def cleanup_completed(self):
         now = time.time()
         with self.lock, self.connect() as db:
+            place_context.cleanup(db, now)
             rows = db.execute("""SELECT id,path,COALESCE(audio_bytes,0) AS audio_bytes,
                 audio_expires_at,audio_pinned,COALESCE(completed_at,received) AS completed_at
                 FROM chunks WHERE status='complete' AND audio_state='present'
@@ -574,6 +601,57 @@ class Inbox:
             self._reconcile_index(db)
             return saved
 
+    def timeline_list(self, day=None):
+        with self.connect() as db:
+            report = timeline.list_timeline(db, day=day)
+            now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
+            report['devices'] = []
+            for index, row in enumerate(db.execute('SELECT device,max(received) FROM chunks GROUP BY device ORDER BY max(received) DESC LIMIT 20')):
+                active = db.execute("SELECT meeting_id FROM intervals WHERE device_id=? AND source='manual' AND closed=0 AND deadline>? ORDER BY started_at DESC LIMIT 1", (row['device'], now)).fetchone()
+                report['devices'].append({'device_id': row['device'], 'label': 'Phone ' + str(index+1), 'active_meeting_id': active[0] if active else None})
+            return report
+
+    def timeline_mutation(self, action, body):
+        with self.lock, self.connect() as db:
+            if action in ('accept', 'reject'):
+                result = timeline.decide_suggestion(db, body['id'], body['revision'], action == 'accept', body.get('title'))
+            elif action == 'split':
+                result = timeline.split_edit(db, body['id'], body['revision'], body['before_clip_id'], body.get('titles'))
+            elif action == 'merge':
+                result = timeline.merge_edits(db, body['ids'], body['revisions'], body['title'])
+            else:
+                raise ValueError('Unknown timeline action')
+            self._reconcile_index(db)
+            return result
+
+    def places_list(self):
+        with self.connect() as db:
+            events = [dict(row) | place_context.event_place(db, row['event_id']) for row in db.execute(
+                "SELECT id AS event_id,title FROM event_edits ORDER BY updated_at DESC LIMIT 200")]
+            return {'places': place_context.list_places(db), 'events': events, 'last_known': place_context.last_known(db)}
+
+    def place_mutation(self, action, body):
+        with self.lock, self.connect() as db:
+            if action == 'save':
+                values = dict(body)
+                identifier = values.pop('id', None)
+                return place_context.save_place(db, values, identifier)
+            if action == 'delete':
+                return place_context.delete_place(db, body['id'], body['revision'])
+            if action == 'tag':
+                return place_context.set_event_place(db, body['event_id'], body.get('place_id'), body['revision'])
+            if action == 'clear':
+                if body.get('observation_id'):
+                    return place_context.delete_observation(db, body['observation_id'])
+                return place_context.clear_history(db, body['device_id'], {'id': body['id'], 'occurred_at': body['occurred_at']})
+            raise ValueError('Unknown place action')
+
+    def location_request(self, device, body, delete=False):
+        with self.lock, self.connect() as db:
+            place_context.cleanup(db)
+            return (place_context.clear_history(db, device, body) if delete
+                    else place_context.ingest_observation(db, device, body))
+
     def viewer_days(self) -> list[str]:
         days = set()
         for row in self.list_chunks():
@@ -588,6 +666,8 @@ class Inbox:
         return sorted(days)
 
     def viewer_day(self, day: str) -> dict:
+        with self.connect() as db:
+            identity_revision = speaker_identity.revision(db)
         start_local = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=DISPLAY_ZONE)
         end_local = start_local + timedelta(days=1)
         start_utc = start_local.astimezone(timezone.utc)
@@ -692,13 +772,27 @@ class Inbox:
                 "speakers": None,
             })
         with self.connect() as db:
-            display_blocks = event_edits.overlay(chunks, event_edits.load(db))
+            all_display = event_edits._chunks(db.execute('SELECT id,started,duration,transcript FROM chunks').fetchall())
+            day_ids = {item['id'] for item in chunks}
+            display_blocks = []
+            for block in event_edits.overlay(all_display, event_edits.load(db)):
+                ids = block.get('chunk_ids') or [block.get('chunk_id')]
+                visible = [identifier for identifier in ids if identifier in day_ids]
+                if not visible:
+                    continue
+                portion = dict(block)
+                if block.get('kind') == 'event':
+                    portion['chunk_ids'] = visible
+                    portion['clip_count'] = len(visible)
+                    portion['day_portion'] = len(visible) != len(ids)
+                display_blocks.append(portion)
             display_blocks = event_summaries.decorate(
                 db, display_blocks, {chunk["id"]: chunk for chunk in chunks},
             )
             display_blocks = event_edits.confirmed_speakers(display_blocks)
         return {
             "day": day,
+            "identity_revision": identity_revision,
             "sessions": sessions,
             "chunks": chunks,
             "intervals": intervals,
@@ -816,6 +910,7 @@ class Inbox:
         """Speakers for one opened recording. This read does not enroll or auto-tag."""
         with self.connect() as db:
             db.execute("PRAGMA query_only=ON")
+            identity_revision = speaker_identity.revision(db)
             row = db.execute(
                 "SELECT id, transcript, diarization_status FROM chunks WHERE id=?",
                 (chunk_id,),
@@ -825,6 +920,7 @@ class Inbox:
             return None
         return {
             "id": chunk_id,
+            "identity_revision": identity_revision,
             "transcript": row["transcript"] or "",
             "diarization_status": row["diarization_status"],
             "diarization": self.diarization_summary(chunk_id),
@@ -851,6 +947,54 @@ class Inbox:
             item["enrollment_ready"] = not item["enrollment_reasons"]
             people.append(item)
         return people
+
+    def identity_profiles(self):
+        with self.connect() as db:
+            return speaker_identity.profiles(db)
+
+    def speaker_clusters(self):
+        with self.connect() as db:
+            report = speaker_identity.clusters(db)
+            report.update(speaker_identity.proposals(db))
+            return report
+
+    def identity_mutation(self, action, body):
+        """Human-only mutations share one revision and one committed index update."""
+        allowed = {
+            "label": {"turn_ids", "person_id", "use_sample", "revision"},
+            "remove_sample": {"sample_id", "revision"},
+            "undo": {"change_id", "revision"},
+            "merge": {"track_ids", "revision"},
+            "split": {"track_id", "turn_ids", "revision"},
+            "name": {"track_id", "turn_ids", "person_id", "revision"},
+        }
+        if action not in allowed or set(body) - allowed[action]:
+            raise ValueError("Invalid identity request")
+        with self.lock, self.connect() as db:
+            revision = body.get("revision")
+            if action == "label":
+                result = speaker_identity.change_turns(db, body.get("turn_ids"), body.get("person_id"), body.get("use_sample", False), revision)
+            elif action == "remove_sample":
+                result = speaker_identity.remove_sample(db, body.get("sample_id"), revision)
+            elif action == "undo":
+                result = speaker_identity.undo(db, body.get("change_id"), revision)
+            elif action == "merge":
+                result = speaker_identity.merge(db, body.get("track_ids"), revision)
+            elif action == "split":
+                result = speaker_identity.split(db, body.get("track_id"), body.get("turn_ids"), revision)
+            else:
+                result = speaker_identity.name_selected(db, body.get("track_id"), body.get("turn_ids"), body.get("person_id"), revision)
+            self._index_identity_change(db, result)
+            return result
+
+    def _index_identity_change(self, db, result):
+        row = db.execute("SELECT before_json,after_json FROM speaker_identity_changes WHERE id=?", (result["change_id"],)).fetchone()
+        before = {turn["id"]: (turn["person_id"], turn["label_source"]) for turn in json.loads(row[0])["speaker_turns"]}
+        affected = {turn["chunk_id"] for turn in json.loads(row[1])["speaker_turns"]
+                    if before.get(turn["id"]) != (turn["person_id"], turn["label_source"])}
+        self._reconcile_index(db, affected)
+        if affected:
+            agent_api.note_speaker_change(db, affected)
 
     def create_person(self, name: str):
         name = " ".join(str(name).split())[:100]
@@ -879,49 +1023,27 @@ class Inbox:
         return {"id": person_id, "name": name} if result.rowcount else None
 
     def label_turn(self, turn_id: str, person_id: str, use_sample: bool = False):
-        """Confirm a human label. Enroll a sample only when the caller opts in."""
-        use_sample = use_sample is True
-        with self.connect() as db:
+        return self.label_turn_change(turn_id, person_id, use_sample) is not None
+
+    def label_turn_change(self, turn_id, person_id, use_sample=False, expected_revision=None):
+        """Confirm a review stretch; old clients may omit the human-edit revision."""
+        if type(use_sample) is not bool:
+            raise ValueError("Invalid enrollment choice")
+        with self.lock, self.connect() as db:
             person = db.execute("SELECT id FROM people WHERE id=?", (person_id,)).fetchone()
             turn = db.execute("SELECT * FROM speaker_turns WHERE id=?", (turn_id,)).fetchone()
             if not person or not turn:
-                return False
-            peers = db.execute("""SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started, ended, id""",
-                               (turn["chunk_id"],)).fetchall()
+                return None
+            peers = list(db.execute("SELECT * FROM speaker_turns WHERE chunk_id=? ORDER BY started,ended,id", (turn["chunk_id"],)))
             matching = next((group for group in review_groups(peers)
-                             if any(candidate["id"] == turn_id for candidate in group)), None)
-            if not matching:
-                matching = [turn]
-            turn_ids = [candidate["id"] for candidate in matching]
-            placeholders = ",".join("?" for _ in turn_ids)
-            before = {
-                row["id"]: (row["person_id"], row["label_source"])
-                for row in db.execute(
-                    f"SELECT id, person_id, label_source FROM speaker_turns WHERE id IN ({placeholders})",
-                    turn_ids,
-                )
-            }
-            db.execute(f"""UPDATE speaker_turns SET person_id=?,label_source='confirmed'
-                WHERE id IN ({placeholders})""", (person_id, *turn_ids))
-            changed = any(before.get(candidate_id) != (person_id, "confirmed") for candidate_id in turn_ids)
-            person_changed = any(before.get(candidate_id, (None, None))[0] != person_id for candidate_id in turn_ids)
-            enrolled = {"enrolled": False}
-            if use_sample or person_changed:
-                db.execute(f"DELETE FROM voice_samples WHERE turn_id IN ({placeholders})", turn_ids)
-                voice_id.clear_enrollment(db, turn_ids)
-            if use_sample:
-                enrolled = voice_id.enroll_turns(db, matching, person_id)
-            # This current human action has an explicit enrollment choice.
-            # Do not let legacy background recovery override it later. Other
-            # stretches can still be explicitly enrolled through this route.
-            db.execute("INSERT OR IGNORE INTO voice_recover_skip (chunk_id) VALUES (?)", (turn["chunk_id"],))
-            voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
-            if enrolled.get("enrolled"):
+                             if any(candidate["id"] == turn_id for candidate in group)), [turn])
+            revision = speaker_identity.revision(db) if expected_revision is None else expected_revision
+            result = speaker_identity.change_turns(db, [candidate["id"] for candidate in matching],
+                                                   person_id, use_sample, revision)
+            if result.get("enrollment", {}).get("enrolled"):
                 voice_id.enqueue_unlabeled(db, "sample")
-            self._reconcile_index(db, {turn["chunk_id"]})
-            if changed:
-                agent_api.note_speaker_change(db, [turn["chunk_id"]])
-        return True
+            self._index_identity_change(db, result)
+            return result
 
 
 def cosine(left, right):
@@ -962,6 +1084,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.respond(401, {"error": "Unauthorized"})
         if self.path.startswith("/v1/chunks/status?"):
             return self.handle_processing_status()
+        if self.path == '/v1/location/status':
+            try:
+                device = valid_uuid(self.headers.get('X-Device-ID', ''))
+                with self.inbox.connect() as db:
+                    place_context.cleanup(db)
+                    known = place_context.last_known(db)
+                    row = db.execute('SELECT device FROM location_observations WHERE id=?', (known['observation_id'],)).fetchone()
+                    if not row or row['device'] != device:
+                        known = {'status': 'unknown', 'observation_id': None, 'place': None}
+                    places = [{'name': item['name']} for item in place_context.list_places(db)]
+                return self.respond(200, {'last_known': known, 'known_places': places})
+            except ValueError:
+                return self.respond(400, {'error': 'Invalid device'})
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
         payload = {"ok": True, "chunks": self.inbox.status(), "health": self.inbox.health_snapshot()}
@@ -1022,6 +1157,21 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/v1/meeting-events":
                 return self.handle_meeting_event()
+            if self.path in ('/v1/location/observations', '/v1/location/delete-history'):
+                device = valid_uuid(self.headers.get('X-Device-ID', ''))
+                length = int(self.headers.get('Content-Length', '0'))
+                if not 0 < length <= 4096 or self.headers.get('Transfer-Encoding'):
+                    return self.respond(413, {'error': 'Invalid context size'})
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise ValueError('Incomplete context')
+                body = json.loads(raw)
+                try:
+                    result = self.inbox.location_request(device, body, self.path.endswith('delete-history'))
+                except AgentError as error:
+                    return self.respond(error.status, {'error': 'Invalid location request'})
+                key = 'request_id' if self.path.endswith('delete-history') else 'observation_id'
+                return self.respond(200, {key: result['id'], 'durable': True})
             if not self.path.startswith("/v1/chunks/"):
                 return self.respond(404, {"error": "Not found"})
             chunk_id = valid_uuid(self.path.removeprefix("/v1/chunks/"))
@@ -1060,8 +1210,14 @@ class Handler(BaseHTTPRequestHandler):
                 self.headers.get("X-Activity-Shadow"),
                 self.headers.get("X-Activity-Version"),
             )
+            observation = self.headers.get('X-Location-Observation-ID')
+            if observation:
+                try:
+                    observation = valid_uuid(observation)
+                except ValueError:
+                    observation = None
             try:
-                new = self.inbox.accept(tmp, chunk_id, digest, device, started, duration, activity)
+                new = self.inbox.accept(tmp, chunk_id, digest, device, started, duration, activity, observation)
             except ValueError:
                 return self.respond(409, {"error": "Chunk ID conflict"})
             self.respond(201 if new else 200, {"id": chunk_id, "sha256": digest, "durable": True})
@@ -1235,7 +1391,9 @@ def main():
         "enhancement": bool(args.ffmpeg and not args.no_vad and args.vad_cli.is_file()
                             and not args.no_enhance and args.enhance_cli and args.enhance_cli.is_file()),
         "summaries": os.environ.get("LIFE_RECORDER_REMOTE_SUMMARIES") == "1",
+        "topics": os.environ.get("LIFE_RECORDER_TOPIC_ANALYSIS") == "1",
     }
+    threading.Thread(target=topic_analysis.worker, args=(inbox, stop), daemon=True).start()
     if transcribe_ok:
         threading.Thread(target=worker,
                          args=(inbox, stop, args.model, args.whisper, args.ffmpeg,

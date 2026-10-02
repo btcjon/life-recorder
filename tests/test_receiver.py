@@ -10,6 +10,7 @@ import tempfile
 import threading
 import unittest
 import uuid
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "receiver"))
 import receiver as receiver_mod
@@ -58,6 +59,22 @@ class ReceiverTests(unittest.TestCase):
         row = reopened.receipt(chunk_id)
         self.assertEqual(Path(row["path"]).read_bytes(), b"test audio")
         self.assertEqual(row["sha256"], receipt["sha256"])
+
+    def test_optional_location_errors_never_block_audio_receipt(self):
+        for invalid in ('not-a-uuid', str(uuid.uuid4())):
+            def fail_binding(db, chunk_id, observation_id):
+                db.execute('INSERT INTO clip_place_context(chunk_id,observation_id) VALUES(?,?)', (chunk_id, observation_id))
+                raise RuntimeError('optional context failure')
+            with mock.patch('place_context.bind_clip', side_effect=fail_binding):
+                status, receipt, chunk_id = self.upload(**{'X-Location-Observation-ID': invalid})
+                self.assertEqual(status, 201)
+                self.assertTrue(receipt['durable'])
+                self.assertEqual(Path(self.inbox.receipt(chunk_id)['path']).read_bytes(), b'test audio')
+                replay, repeated, _ = self.upload(chunk_id=chunk_id, **{'X-Location-Observation-ID': invalid})
+                self.assertEqual(replay, 200)
+                self.assertTrue(repeated['durable'])
+            with self.inbox.connect() as db:
+                self.assertEqual(db.execute('SELECT count(*) FROM clip_place_context WHERE chunk_id=?', (chunk_id,)).fetchone()[0], 0)
 
     def test_lost_receipt_retry_is_idempotent_with_retained_audio(self):
         _, _, chunk_id = self.upload()

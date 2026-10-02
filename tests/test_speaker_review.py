@@ -406,7 +406,7 @@ class SpeakerReviewRouteTests(ViewerCase):
         self.assertIn("/v1/audio/", viewer.JS)
         self.assertIn("player.currentTime = startAt", viewer.JS)
         self.assertIn("clipStopTime = stopAt", viewer.JS)
-        self.assertIn("#people-view, #review-view { padding: 16px", viewer.CSS)
+        self.assertIn("#people-view, #review-view, #context-view { padding: 16px", viewer.CSS)
 
     def test_confirm_requires_explicit_sample_opt_in(self):
         person = self.inbox.create_person("Jon")

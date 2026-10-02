@@ -256,8 +256,8 @@ def profiles(db):
     result = []
     for person in db.execute("SELECT id,name FROM people ORDER BY name COLLATE NOCASE,id"):
         p = manual.get(person['id'], {'samples': 0, 'clips': set(), 'seconds': 0, 'ready': False})
-        samples = [dict(r) for r in db.execute("""SELECT s.id,s.turn_id,t.chunk_id,s.duration,s.confirmed_at,s.status,s.legacy
-            FROM voice_samples s LEFT JOIN speaker_turns t ON t.id=s.turn_id WHERE s.person_id=? ORDER BY s.confirmed_at,s.id""", (person['id'],))]
+        samples = [dict(r) for r in db.execute("""SELECT s.id,s.turn_id,t.chunk_id,c.started AS clip_started,s.duration,s.confirmed_at,s.status,s.legacy
+            FROM voice_samples s LEFT JOIN speaker_turns t ON t.id=s.turn_id LEFT JOIN chunks c ON c.id=t.chunk_id WHERE s.person_id=? ORDER BY s.confirmed_at,s.id LIMIT 200""", (person['id'],))]
         result.append({'id': person['id'], 'name': person['name'], 'sample_count': p['samples'],
                        'clip_count': len(p['clips']), 'sample_seconds': round(p['seconds'], 3),
                        'enrollment_ready': p['ready'], 'enrollment_reasons': voice_id.enrollment_reasons(p['samples'], len(p['clips']), p['seconds']), 'samples': samples})
@@ -293,7 +293,7 @@ def evaluation_gate(db):
     report = json.loads(row[0])
     if (not isinstance(report, dict) or not isinstance(report.get('categories'), dict)
             or any(type(report.get(k)) is not int for k in ('false_assignments', 'correct_assignments', 'unknown_cases'))
-            or any(type(report['categories'].get(c)) is not int for c in ('noise', 'overlap', 'short', 'unknown'))):
+            or any(type(report['categories'].get(c)) is not int for c in ('noise', 'distance', 'overlap', 'short', 'unknown'))):
         return {'enabled': False, 'reason': 'evaluation_not_passed'}
     valid = (report.get('algorithm') == ALGORITHM and report.get('extraction_version') == voice_id.EXTRACTION_VERSION
              and report.get('consent') is True and report.get('separated_clips') is True
@@ -303,7 +303,8 @@ def evaluation_gate(db):
              and report.get('thresholds') == {'score': voice_id.AUTO_MIN_SCORE, 'margin': voice_id.AUTO_MIN_MARGIN}
              and isinstance(report.get('manifest_sha256'), str)
              and re.fullmatch('[0-9a-f]{64}', report['manifest_sha256']) is not None
-             and all(report.get('categories', {}).get(c, 0) >= 2 for c in ('noise', 'overlap', 'short', 'unknown')))
+             and report.get('enrollment_references_ready') is True
+             and all(report.get('categories', {}).get(c, 0) >= 2 for c in ('noise', 'distance', 'overlap', 'short', 'unknown')))
     return {'enabled': bool(valid), 'reason': 'evaluated' if valid else 'evaluation_not_passed'}
 
 

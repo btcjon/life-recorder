@@ -5,9 +5,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     func application(_ application: UIApplication,
                      handleEventsForBackgroundURLSession identifier: String,
                      completionHandler: @escaping () -> Void) {
-        guard identifier == UploadManager.sessionID else { completionHandler(); return }
-        UploadManager.shared.backgroundCompletion = completionHandler
-        UploadManager.shared.activate()
+        switch identifier {
+        case UploadManager.sessionID:
+            UploadManager.shared.backgroundCompletion = completionHandler
+            UploadManager.shared.activate()
+        case ContextTransport.sessionID:
+            ContextTransport.shared.backgroundCompletion = completionHandler
+            ContextTransport.shared.activate()
+        default: completionHandler()
+        }
     }
 }
 
@@ -23,10 +29,17 @@ struct LifeRecorderApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView(recorder: recorder, uploads: uploads, showSettings: $showSettings)
-                .task { uploads.activate(); await recorder.applySchedule() }
+                .task {
+                    uploads.activate()
+                    ContextTransport.shared.activate()
+                    LocationContext.shared.activate()
+                    await recorder.applySchedule()
+                }
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .active {
                         uploads.activate()
+                        ContextTransport.shared.activate()
+                        LocationContext.shared.activate()
                         Task { await recorder.applySchedule() }
                     }
                 }
@@ -39,6 +52,7 @@ struct LifeRecorderApp: App {
                         try ReceiverSettings.save(url: query["url"] ?? "", token: query["token"] ?? "",
                                                   pin: query["pin"] ?? "")
                         uploads.configurationChanged()
+                        ContextTransport.shared.activate()
                         showSettings = true
                     } catch { pairingError = error.localizedDescription }
                 }
@@ -87,6 +101,8 @@ struct ContentView: View {
                                 incompleteClips: recorder.incompleteClips) {
                         uploads.retryNow()
                     }
+                    MeetingPanel()
+                    LocationPanel()
                     Text("Records with the screen locked. Pauses 10:00 PM-5:00 AM Eastern. After restarting the phone or force-quitting, open this app once to resume. Switching off stays off.")
                         .font(.footnote).foregroundStyle(.secondary)
                 }.padding(24)
@@ -94,6 +110,33 @@ struct ContentView: View {
             .navigationTitle("Life Recorder").navigationBarTitleDisplayMode(.inline)
             .toolbar { Button("Pair Mac", systemImage: "laptopcomputer") { showSettings = true } }
             .sheet(isPresented: $showSettings) { PairingView(uploads: uploads) }
+        }
+    }
+}
+
+struct MeetingPanel: View {
+    @ObservedObject private var meeting = MeetingCapture.shared
+    @ObservedObject private var transport = ContextTransport.shared
+    @State private var markerError: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Meeting context").font(.headline)
+            Text(meeting.isActive ? "Meeting marked active on this phone" : "No meeting marked on this phone")
+                .font(.subheadline)
+            Button(meeting.isActive ? "End meeting" : "Start meeting") {
+                do {
+                    if meeting.isActive { try meeting.end() } else { try meeting.start() }
+                    markerError = nil
+                    transport.activate()
+                } catch { markerError = "Could not save the meeting marker. Try again." }
+            }
+            .buttonStyle(.bordered)
+            .accessibilityIdentifier("meetingToggle")
+            Text("Marks the meeting in your timeline. Audio follows the recorder switch. Your Mac may close a meeting after a recording gap, quiet hours, or four hours.")
+                .font(.footnote).foregroundStyle(.secondary)
+            Text(transport.status).font(.caption).foregroundStyle(.secondary)
+            if let markerError { Text(markerError).font(.caption).foregroundStyle(.red) }
         }
     }
 }
@@ -131,6 +174,7 @@ struct PairingView: View {
                         do {
                             try ReceiverSettings.save(url: address, token: token, pin: pin)
                             uploads.configurationChanged()
+                            ContextTransport.shared.activate()
                             dismiss()
                         } catch { self.error = error.localizedDescription }
                     }

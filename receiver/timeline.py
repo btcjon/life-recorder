@@ -77,7 +77,7 @@ def list_timeline(db, day=None, limit=200):
         where = " WHERE started_at<? AND coalesce(ended_at,deadline,started_at)>=?" if bounds else ""
         args = (bounds[1], bounds[0], limit + 1) if bounds else (limit + 1,)
         for row in db.execute("SELECT * FROM intervals" + where + " ORDER BY started_at DESC,id LIMIT ?", args):
-            entries.append({key: row[key] for key in ("id", "source", "label", "started_at", "ended_at", "closed", "closure_reason", "status")} | {
+            entries.append({key: row[key] for key in ("id", "device_id", "meeting_id", "source", "label", "started_at", "ended_at", "closed", "closure_reason", "status")} | {
                 "revision": None, "source_ids": json.loads(row["chunk_ids"] or "[]"),
                 "human_override": row["source"] == "manual", "reasons": json.loads(row["reasons"] or "[]")})
     rows = _rows(db)
@@ -128,7 +128,7 @@ def publish_suggestions(db, *, fingerprint, rows, segments, model, prompt_versio
     now = time.time() if now is None else now
     source_ids = [r["id"] for r in rows]
     source_hash = source_fingerprint(rows)
-    for old in db.execute("SELECT id,source_ids FROM topic_suggestions WHERE state='proposed' AND fingerprint!=?", (fingerprint,)).fetchall():
+    for old in db.execute("SELECT id,source_ids FROM topic_suggestions WHERE state='proposed' AND fingerprint!=? AND model=?", (fingerprint, model)).fetchall():
         if set(json.loads(old["source_ids"])).intersection(source_ids):
             db.execute("UPDATE topic_suggestions SET state='superseded',revision=revision+1,updated_at=? WHERE id=?", (now, old["id"]))
     positions = {identifier: i for i, identifier in enumerate(source_ids)}

@@ -167,6 +167,9 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                     request.setValue(QueueStore.deviceID, forHTTPHeaderField: "X-Device-ID")
                     request.setValue(Self.timestamp(chunk.startedAt), forHTTPHeaderField: "X-Started-At")
                     request.setValue(String(chunk.duration), forHTTPHeaderField: "X-Duration-Seconds")
+                    if let observationID = Self.locationObservationHeader(for: chunk) {
+                        request.setValue(observationID, forHTTPHeaderField: "X-Location-Observation-ID")
+                    }
                     if let activity = chunk.activity {
                         let value = String(activity.headerValue.prefix(256))
                         request.setValue(value, forHTTPHeaderField: "X-Activity-Shadow")
@@ -261,6 +264,11 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                 }
             }
         }
+    }
+
+    static func locationObservationHeader(for chunk: Chunk) -> String? {
+        guard let id = chunk.locationObservationID, UUID(uuidString: id)?.uuidString.lowercased() == id else { return nil }
+        return id
     }
 
     private static func timestamp(_ date: Date) -> String {

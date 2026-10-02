@@ -44,6 +44,7 @@ struct Chunk: Codable {
     let duration: Double
     let sha256: String
     var activity: ChunkActivity? = nil
+    var locationObservationID: String? = nil
     var name: String { id.uuidString.lowercased() }
     var audioURL: URL { QueueStore.directory.appendingPathComponent(name + ".m4a") }
     var manifestURL: URL { QueueStore.directory.appendingPathComponent(name + ".json") }
@@ -52,6 +53,7 @@ struct Chunk: Codable {
 struct RecordingJournal: Codable {
     let id: UUID
     let startedAt: Date
+    var locationObservationID: String? = nil
 }
 
 enum QueueStore {
@@ -95,7 +97,8 @@ enum QueueStore {
         let audio = directory.appendingPathComponent(name + ".m4a")
         let chunk = Chunk(id: journal.id, startedAt: journal.startedAt, duration: duration,
                           sha256: try checksum(audio),
-                          activity: activity.map(ChunkActivity.init))
+                          activity: activity.map(ChunkActivity.init),
+                          locationObservationID: journal.locationObservationID)
         try JSONEncoder().encode(chunk).write(to: chunk.manifestURL, options: .atomic)
         try? FileManager.default.removeItem(at: directory.appendingPathComponent(name + ".recording.json"))
         return chunk

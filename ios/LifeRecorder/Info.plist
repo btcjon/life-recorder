@@ -50,6 +50,12 @@
 	<string>Send recorded audio securely to your Mac for transcription.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Record your audio while the recorder is on, including when the screen is locked.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Add optional place context to your recordings when you switch location context on.</string>
+	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
+	<string>Continue the optional background location battery trial while recording when you choose that trial.</string>
+	<key>NSMotionUsageDescription</key>
+	<string>Add optional walking, stationary, or vehicle activity context when you switch motion context on.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -58,6 +64,7 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
+		<string>location</string>
 	</array>
 	<key>UILaunchScreen</key>
 	<dict/>

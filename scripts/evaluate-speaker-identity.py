@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'receiver'))
 import speaker_identity
 import voice_id
 
-CATEGORIES = {'known', 'unknown', 'noise', 'overlap', 'short'}
+CATEGORIES = {'known', 'unknown', 'noise', 'distance', 'overlap', 'short'}
 
 
 def _vectors(db, turn_id):
@@ -58,12 +58,20 @@ def evaluate(db, manifest):
         return dict(unavailable, consent=True, separated_clips=separated_clips,
                     separated_sessions=separated_sessions, reason='holdout_leakage')
     profiles = {}
+    reference_stats = {}
     for e in refs:
-        profiles.setdefault(e['identity'], []).extend(_vectors(db, e['turn_id']))
+        vectors = _vectors(db, e['turn_id'])
+        profiles.setdefault(e['identity'], []).extend(vectors)
+        stats = reference_stats.setdefault(e['identity'], {'samples': 0, 'clips': set(), 'seconds': 0})
+        if vectors:
+            stats['samples'] += 1
+            stats['clips'].add(clips[e['turn_id']])
+            stats['seconds'] += db.execute('SELECT coalesce(sum(duration),0) FROM voice_vectors WHERE turn_id=? AND timed=1 AND legacy=0 AND overlap=0 AND extraction_version=?', (e['turn_id'], voice_id.EXTRACTION_VERSION)).fetchone()[0]
     if len(profiles) < 2 or any(not p for p in profiles.values()):
         return dict(unavailable, consent=True, reason='need_two_eligible_reference_identities')
     correct = false = abstained = unknown = 0
     categories = {category: 0 for category in sorted(CATEGORIES)}
+    by_identity, by_condition = {}, {}
     for e in cases:
         categories[e['category']] += 1
         if e['identity'] is None:
@@ -79,17 +87,26 @@ def evaluate(db, manifest):
                 prediction = best
         if prediction is None:
             abstained += 1
+            outcome = 'abstentions'
         elif prediction == e['identity']:
             correct += 1
+            outcome = 'correct_assignments'
         else:
             false += 1
-    passed = false == 0 and correct >= 10 and unknown >= 10 and all(categories[c] >= 2 for c in ('noise', 'overlap', 'short', 'unknown'))
+            outcome = 'false_assignments'
+        for grouping, key in ((by_identity, e['identity'] or 'unknown'), (by_condition, e['category'])):
+            counts = grouping.setdefault(key, {'cases': 0, 'correct_assignments': 0, 'false_assignments': 0, 'abstentions': 0})
+            counts['cases'] += 1
+            counts[outcome] += 1
+    references_ready = all(s['samples'] >= 2 and len(s['clips']) >= 2 and s['seconds'] >= 10 for s in reference_stats.values())
+    passed = references_ready and false == 0 and correct >= 10 and unknown >= 10 and all(categories[c] >= 2 for c in ('noise', 'distance', 'overlap', 'short', 'unknown'))
     return {'status': 'passed' if passed else 'not_passed', 'algorithm': speaker_identity.ALGORITHM,
             'extraction_version': voice_id.EXTRACTION_VERSION, 'consent': True,
             'separated_clips': True, 'separated_sessions': True,
             'thresholds': {'score': voice_id.AUTO_MIN_SCORE, 'margin': voice_id.AUTO_MIN_MARGIN},
             'correct_assignments': correct, 'false_assignments': false, 'abstentions': abstained,
             'unknown_cases': unknown, 'categories': categories, 'case_count': len(cases),
+            'enrollment_references_ready': references_ready, 'by_identity': by_identity, 'by_condition': by_condition,
             'manifest_sha256': hashlib.sha256(json.dumps(manifest, sort_keys=True).encode()).hexdigest()}
 
 

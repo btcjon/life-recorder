@@ -19,8 +19,13 @@ final class Recorder: ObservableObject {
     private var scheduleTimer: Timer?
     private var routeWorkItem: DispatchWorkItem?
     private var inputFormat: AVAudioFormat?
+    private let contextSnapshot = ChunkContextSnapshot()
+    private var contextObservation: AnyCancellable?
 
     init() {
+        contextObservation = LocationContext.shared.$lastObservation.sink { [contextSnapshot] observation in
+            contextSnapshot.update(id: observation?.id, capturedAt: observation?.capturedAt)
+        }
         if enabled { status = "Ready to resume" }
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: AVAudioSession.interruptionNotification,
@@ -115,6 +120,8 @@ final class Recorder: ObservableObject {
                     await self.stopCapture()
                     self.status = message
                 }
+            }, locationObservationID: { [contextSnapshot] chunkStart in
+                contextSnapshot.observationID(forClipStart: chunkStart)
             })
             input.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in nextWriter.consume(buffer) }
             nextEngine.prepare()

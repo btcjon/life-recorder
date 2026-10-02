@@ -18,6 +18,8 @@ from access_auth import AccessAuthError, AccessVerifier, RemoteAccessConfig, Ver
 from agent_api import http as agent_http
 import event_edits
 import speaker_review
+import speaker_identity
+from agent_api.errors import AgentError
 
 VIEWER_PORT = 8767
 VIEWER_HOST = "127.0.0.1"
@@ -185,6 +187,7 @@ APP = """<!doctype html>
       <button id="tab-recordings" type="button" aria-pressed="true">Recordings</button>
       <button id="tab-review" type="button" aria-pressed="false">Review</button>
       <button id="tab-people" type="button" aria-pressed="false">People</button>
+      <button id="tab-context" type="button" aria-pressed="false">Context</button>
     </nav>
     <label class="day-control"><input id="day" type="date" aria-label="Day"></label>
     <button id="refresh" type="button">Refresh</button>
@@ -211,6 +214,13 @@ APP = """<!doctype html>
   <section id="people-view" hidden>
     <h2>People</h2>
     <div id="people"></div>
+    <div id="identity-tools"></div>
+  </section>
+  <section id="context-view" hidden aria-labelledby="context-heading">
+    <h2 id="context-heading">Timeline and places</h2>
+    <p id="context-status" class="meta" aria-live="polite"></p>
+    <div id="timeline-tools"></div>
+    <div id="place-tools"></div>
   </section>
   <section id="review-view" hidden aria-labelledby="review-heading">
     <h2 id="review-heading">Review</h2>
@@ -299,7 +309,11 @@ aside .event-people { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;
 .event-form input, .event-form select { width: 100%; min-width: 0; }
 #pane { padding: 28px clamp(22px, 5vw, 64px) 80px; }
 #pane > * { max-width: 860px; }
-#people-view { padding: 28px clamp(22px, 5vw, 64px) 100px; }
+#people-view, #context-view { padding: 28px clamp(22px, 5vw, 64px) 100px; overflow-y: auto; }
+.context-card { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin: 14px 0; }
+.context-card label { display: block; margin: 8px 0; }
+.context-card input, .context-card select { max-width: 100%; }
+.context-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
 .row, .item, .person, .group { border: 1px solid var(--line); padding: 12px; margin: 0 0 9px; background: var(--surface); border-radius: 12px; }
 .row { width: 100%; text-align: left; cursor: pointer; font-weight: 500; }
 .row[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: none; }
@@ -365,7 +379,7 @@ summary { cursor: pointer; color: var(--muted); }
   aside, #pane, #people-view, #review-view { overflow: visible; min-width: 0; }
   aside { width: auto; max-width: none; min-width: 0; padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); border-right: 0; }
   #pane { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
-  #people-view, #review-view { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
+  #people-view, #review-view, #context-view { padding: 16px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); padding-bottom: 96px; }
   .review-card, .review-actions, .suggestion-row { min-width: 0; }
   .review-card button, .review-card select, .review-card label { min-height: 44px; font-size: 16px; }
   .review-actions button, .suggestion-row button { flex: 1 1 140px; }
@@ -386,7 +400,7 @@ summary { cursor: pointer; color: var(--muted); }
   html, body { height: 100%; overflow: hidden; }
   header, #player-bar { flex: 0 0 auto; }
   main { min-height: 0; overflow: hidden; display: flex; flex-direction: column; }
-  #library, #people-view, #review-view { flex: 1 1 auto; min-height: 0; }
+  #library, #people-view, #review-view, #context-view { flex: 1 1 auto; min-height: 0; }
   #filters { display: contents; }
   #filters > summary { display: none; }
   #filters .filter-body { display: flex; flex-wrap: nowrap; }
@@ -432,6 +446,15 @@ JS = r"""
   const tabRecordings = document.getElementById("tab-recordings");
   const tabReview = document.getElementById("tab-review");
   const tabPeople = document.getElementById("tab-people");
+  const tabContext = document.getElementById("tab-context");
+  const contextView = document.getElementById("context-view");
+  const identityTools = document.getElementById("identity-tools");
+  let identityReport = null;
+  let clusterReport = null;
+  let lastIdentityChange = null;
+  let reviewIdentityRevision = null;
+  let contextReport = null;
+  let placesReport = null;
   const reviewView = document.getElementById("review-view");
   const reviewList = document.getElementById("review-list");
   const reviewStatus = document.getElementById("review-status");
@@ -502,7 +525,10 @@ JS = r"""
         const stage = stages[name];
         if (!stage) continue;
         const counts = Object.entries(stage.counts || {}).map(([state, count]) => String(count) + " " + state).join(", ");
-        parts.push(name.toUpperCase() + ": " + (stage.enabled === false ? "off" : counts || "ready"));
+        const optionalState = stage.status?.state;
+        const reason = stage.status?.error_code;
+        parts.push(name.toUpperCase() + ": " + (stage.enabled === false ? "off" : optionalState || counts || "ready") +
+          (reason && reason !== "disabled" ? " (" + reason + " — configure and verify the Grok route)" : ""));
       }
       if (queue.last_completed_at) parts.push("Last processed: " + new Date(queue.last_completed_at * 1000).toLocaleString());
       if (report.runtime?.source_revision) parts.push("Source: " + String(report.runtime.source_revision).slice(0, 12));
@@ -599,6 +625,7 @@ JS = r"""
     const pending = !!detail.voice_pending;
     const changed = current.speakerStamp !== stamp || !Array.isArray(current.speakers);
     current.speakers = detail.speakers || [];
+    if (Number.isInteger(detail.identity_revision)) current.identity_revision = detail.identity_revision;
     current.speakerStamp = stamp;
     current.reviewState = "ready";
     current.reviewTries = 0;
@@ -657,9 +684,13 @@ JS = r"""
     tabRecordings.setAttribute("aria-pressed", String(view === "recordings"));
     tabReview.setAttribute("aria-pressed", String(view === "review"));
     tabPeople.setAttribute("aria-pressed", String(view === "people"));
+    tabContext.setAttribute("aria-pressed", String(view === "context"));
     library.hidden = view !== "recordings";
     peopleView.hidden = view !== "people";
     reviewView.hidden = view !== "review";
+    contextView.hidden = view !== "context";
+    if (view === "people") loadIdentityTools();
+    if (view === "context") loadContextTools();
     if (view === "review" && !reviewLoaded && !reviewLoading) loadSpeakerReview(true);
     render();
   }
@@ -1257,9 +1288,12 @@ JS = r"""
     return fetch("/v1/turns/" + turn.id + "/label", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId, use_sample: useSample === true })
-    }).then((response) => {
+      body: JSON.stringify({ person_id: personId, use_sample: useSample === true,
+        revision: selectedItem()?.identity_revision ?? payload?.identity_revision })
+    }).then(async (response) => {
       if (!response.ok) throw new Error("label");
+      const result = await response.json();
+      if (result.change_id) lastIdentityChange = result;
       const person = (payload.people || []).find((item) => item.id === personId);
       for (const member of group.turns || []) {
         member.person_id = personId;
@@ -1394,6 +1428,15 @@ JS = r"""
     create.textContent = "New person";
     create.addEventListener("click", () => { identityMode = "new"; identityDraft = null; identityNewName = ""; render(); });
     box.appendChild(create);
+    if ((group.turns || []).some((turn) => turn.person_id)) {
+      toolButton(box, "Remove names from these stretches", async () => {
+        const result = await toolWrite("/v1/identities/label", { turn_ids: group.turns.map((turn) => turn.id),
+          person_id: null, use_sample: false, revision: selectedItem()?.identity_revision ?? payload?.identity_revision });
+        lastIdentityChange = result;
+        closePopover(false);
+        await loadDay();
+      });
+    }
     box.appendChild(note);
     return box;
   }
@@ -1740,6 +1783,193 @@ JS = r"""
       return String(iso || "").slice(0, 10);
     }
   }
+  function toolNode(tag, text, parent) {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = String(text);
+    if (parent) parent.appendChild(node);
+    return node;
+  }
+  function toolButton(parent, text, action) {
+    const button = toolNode("button", text, parent);
+    button.type = "button";
+    button.addEventListener("click", async () => {
+      button.disabled = true;
+      try { await action(); }
+      catch (error) { status.textContent = error.message || "Edit failed. Reload before trying again."; }
+      finally { button.disabled = false; }
+    });
+    return button;
+  }
+  function toolInput(parent, label, value, type = "text") {
+    const wrap = toolNode("label", label + " ", parent);
+    const input = document.createElement("input");
+    input.type = type;
+    input.value = value == null ? "" : String(value);
+    input.setAttribute("aria-label", label);
+    wrap.appendChild(input);
+    return input;
+  }
+  async function toolRead(path) {
+    const response = await fetch(path, { headers: authHeaders(), cache: "no-store" });
+    const report = await response.json();
+    if (!response.ok) throw new Error(report.error || "Could not load context");
+    return report;
+  }
+  async function toolWrite(path, body) {
+    const response = await fetch(path, { method: "POST", headers: { ...authHeaders(), "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const result = await response.json();
+    if (!response.ok) throw new Error(response.status === 409 ? "This changed since it was loaded. Reload before editing." : (result.error || "Edit failed"));
+    return result;
+  }
+  async function identityEdit(action, body) {
+    const result = await toolWrite("/v1/identities/" + action, { ...body, revision: identityReport.revision });
+    lastIdentityChange = result;
+    status.textContent = "Identity edit saved. Human labels and sample choices remain separate.";
+    await loadIdentityTools();
+  }
+  async function loadIdentityTools() {
+    try {
+      [identityReport, clusterReport] = await Promise.all([toolRead("/v1/identity-profiles"), toolRead("/v1/speaker-clusters")]);
+      identityTools.replaceChildren();
+      toolNode("h3", "Voice profiles and anonymous groups", identityTools);
+      toolNode("p", "Samples are explicit opt-ins. Removing one withdraws its voice evidence and refreshes dependent automatic labels. Grouping and naming never enroll samples.", identityTools);
+      if (lastIdentityChange) toolButton(identityTools, "Undo latest identity edit", async () => {
+        await identityEdit("undo", { change_id: lastIdentityChange.change_id });
+      });
+      for (const person of identityReport.people || []) {
+        const card = toolNode("section", undefined, identityTools); card.className = "context-card";
+        toolNode("h4", person.name, card);
+        toolNode("p", person.sample_count + " accepted samples · " + person.clip_count + " recordings · " + Math.round(person.sample_seconds) + " clean seconds · " + (person.enrollment_ready ? "Ready" : (person.enrollment_reasons || []).join(", ")), card);
+        for (const sample of person.samples || []) {
+          const row = toolNode("div", undefined, card);
+          toolNode("p", "Recording " + String(sample.chunk_id || "missing").slice(0, 8) + " · " + Math.round(sample.duration) + " seconds · " + sample.status + (sample.legacy ? " · legacy" : "") + " · accepted " + new Date(sample.confirmed_at * 1000).toLocaleString(), row);
+          toolButton(row, "Open sample recording", () => openReviewClip({ chunk_id: sample.chunk_id, clip_started: sample.clip_started, started: 0 }));
+          toolButton(row, "Remove voice sample", () => identityEdit("remove_sample", { sample_id: sample.id }));
+        }
+      }
+      const gate = clusterReport.gate || {};
+      toolNode("p", gate.enabled ? "Evaluated group suggestions still require a human decision." : "Cross-recording suggestions are off: " + (gate.reason || "evaluation unavailable"), identityTools);
+      const checkedTracks = new Set();
+      const mergeButton = toolButton(identityTools, "Merge selected anonymous groups", () => identityEdit("merge", { track_ids: [...checkedTracks] }));
+      mergeButton.disabled = true;
+      for (const cluster of clusterReport.clusters || []) {
+        const card = toolNode("section", undefined, identityTools); card.className = "context-card";
+        const groupChoice = toolInput(card, "Select group " + cluster.id.slice(0, 8), "", "checkbox");
+        groupChoice.addEventListener("change", () => { groupChoice.checked ? checkedTracks.add(cluster.id) : checkedTracks.delete(cluster.id); mergeButton.disabled = checkedTracks.size < 2; });
+        toolNode("p", cluster.status + " · " + cluster.members.length + " stretches. Preview and select exact stretches below.", card);
+        const selected = new Set();
+        const preview = toolNode("p", "No stretches selected", card);
+        for (const member of cluster.members || []) {
+          const check = toolInput(card, "Recording " + member.chunk_id.slice(0, 8) + " · " + formatTime(member.started) + "–" + formatTime(member.ended) + " · " + (member.person_id ? "stored name" : "anonymous"), "", "checkbox");
+          check.addEventListener("change", () => { check.checked ? selected.add(member.turn_id) : selected.delete(member.turn_id); preview.textContent = selected.size + " selected stretches; only these labels will change. No voice samples will be saved."; });
+          toolButton(card, "Open this recording", () => openReviewClip({ chunk_id: member.chunk_id, started: member.started }));
+        }
+        const choice = toolNode("select", undefined, card); choice.setAttribute("aria-label", "Name selected stretches");
+        const blank = toolNode("option", "Choose a person", choice); blank.value = "";
+        for (const person of identityReport.people || []) { const option = toolNode("option", person.name, choice); option.value = person.id; }
+        const actions = toolNode("div", undefined, card); actions.className = "context-actions";
+        toolButton(actions, "Name selected stretches", async () => { if (!selected.size || !choice.value) throw new Error("Select stretches and a person first."); await identityEdit("name", { track_id: cluster.id, turn_ids: [...selected], person_id: choice.value }); });
+        toolButton(actions, "Remove selected labels", async () => { if (!selected.size) throw new Error("Select stretches first."); await identityEdit("label", { turn_ids: [...selected], person_id: null, use_sample: false }); });
+        toolButton(actions, "Split selected stretches into new group", async () => { if (!selected.size || selected.size === cluster.members.length) throw new Error("Select some, but not all, stretches."); await identityEdit("split", { track_id: cluster.id, turn_ids: [...selected] }); });
+      }
+      for (const proposal of clusterReport.proposals || []) {
+        const row = toolNode("p", "Unconfirmed group suggestion · score " + proposal.score + " · margin " + proposal.margin, identityTools);
+        toolButton(row, "Accept this group merge", () => identityEdit("merge", { track_ids: proposal.track_ids }));
+      }
+    } catch (error) { identityTools.replaceChildren(); toolNode("p", error.message, identityTools); }
+  }
+  async function contextEdit(kind, action, body) {
+    await toolWrite("/v1/" + kind + "/" + action, body);
+    document.getElementById("context-status").textContent = "Saved. Reloaded current revisions.";
+    await loadContextTools();
+  }
+  async function loadContextTools() {
+    const message = document.getElementById("context-status");
+    try {
+      [contextReport, placesReport] = await Promise.all([toolRead("/v1/timeline?day=" + encodeURIComponent(day.value)), toolRead("/v1/places")]);
+      const timelinePane = document.getElementById("timeline-tools"); timelinePane.replaceChildren();
+      toolNode("h3", "Timeline", timelinePane);
+      toolNode("p", "Manual markers use the same meeting system as the phone. A later start closes an earlier open meeting conservatively.", timelinePane);
+      for (const phone of contextReport.devices || []) {
+        const controls = toolNode("section", undefined, timelinePane); controls.className = "context-card";
+        toolNode("h4", phone.label, controls);
+        const marker = async (kind) => {
+          const body = { version: 1, event_id: crypto.randomUUID(), meeting_id: kind === "start" ? crypto.randomUUID() : phone.active_meeting_id,
+            device_id: phone.device_id, kind, occurred_at: new Date().toISOString() };
+          await toolWrite("/v1/meeting-markers", body);
+          await loadContextTools();
+        };
+        toolButton(controls, "Start meeting", () => marker("start"));
+        if (phone.active_meeting_id) toolButton(controls, "End meeting", () => marker("end"));
+      }
+      const selected = new Map();
+      const title = toolInput(timelinePane, "Merged event title", "");
+      const merge = toolButton(timelinePane, "Merge two selected topics", () => contextEdit("timeline", "merge", { ids: [...selected.keys()], revisions: [...selected.values()], title: title.value }));
+      merge.disabled = true;
+      for (const item of contextReport.items || []) {
+        const card = toolNode("section", undefined, timelinePane); card.className = "context-card";
+        toolNode("h4", item.title || item.label || "Event", card);
+        toolNode("p", item.source + " · " + item.started_at + " → " + (item.ended_at || "open") + " · " + (item.status || "saved"), card);
+        if (item.source === "human_topic") {
+          const check = toolInput(card, "Select topic to merge", "", "checkbox");
+          check.addEventListener("change", () => { check.checked ? selected.set(item.id, item.revision) : selected.delete(item.id); merge.disabled = selected.size !== 2; });
+          if ((item.chunk_ids || []).length >= 2) {
+            const before = toolNode("select", undefined, card); before.setAttribute("aria-label", "Split before recording");
+            for (const clip of item.chunk_ids.slice(1)) { const option = toolNode("option", "Split before recording " + clip.slice(0, 8), before); option.value = clip; }
+            const left = toolInput(card, "First topic title", item.title);
+            const right = toolInput(card, "Second topic title", item.title);
+            toolButton(card, "Save split preview", () => contextEdit("timeline", "split", { id: item.id, revision: item.revision, before_clip_id: before.value, titles: [left.value, right.value] }));
+          }
+        }
+      }
+      for (const suggestion of contextReport.suggestions || []) {
+        const card = toolNode("section", undefined, timelinePane); card.className = "context-card";
+        toolNode("h4", "Unconfirmed topic suggestion", card);
+        const title = toolInput(card, "Suggested topic title", suggestion.title);
+        toolNode("p", "Source recordings " + suggestion.start_chunk_id.slice(0, 8) + " → " + suggestion.end_chunk_id.slice(0, 8) + " · " + suggestion.model, card);
+        toolButton(card, "Accept topic boundaries", () => contextEdit("timeline", "accept", { id: suggestion.id, revision: suggestion.revision, title: title.value }));
+        toolButton(card, "Reject topic suggestion", () => contextEdit("timeline", "reject", { id: suggestion.id, revision: suggestion.revision }));
+      }
+      if (contextReport.truncated) toolNode("p", "This timeline is limited. Select a day to narrow it.", timelinePane);
+      renderPlaceTools();
+      if (!message.textContent) message.textContent = "Phone context and human event tags have separate sources.";
+    } catch (error) { message.textContent = error.message; }
+  }
+  function renderPlaceTools() {
+    const host = document.getElementById("place-tools"); host.replaceChildren();
+    toolNode("h3", "Known places", host);
+    toolNode("p", "Phone locations describe the phone, not a speaker. Unknown, stale and overlapping matches remain explicit.", host);
+    const known = placesReport.last_known;
+    if (known) {
+      toolNode("p", "Phone last observed: " + (known.place ? known.place.name : "Unknown") + " · " + known.status + " · age " + Math.round(known.age_seconds || 0) + " seconds · accuracy " + (known.accuracy_m == null ? "unknown" : Math.round(known.accuracy_m) + " m"), host);
+      if (known.observation_id) toolButton(host, "Forget this phone observation and its labels", () => contextEdit("places", "clear", { observation_id: known.observation_id }));
+    }
+    function placeEditor(place) {
+      const card = toolNode("section", undefined, host); card.className = "context-card";
+      toolNode("h4", place ? "Edit known place" : "Add known place", card);
+      const name = toolInput(card, "Place name", place && place.name);
+      const latitude = toolInput(card, "Latitude", place && place.latitude, "number"); latitude.step = "any";
+      const longitude = toolInput(card, "Longitude", place && place.longitude, "number"); longitude.step = "any";
+      const radius = toolInput(card, "Radius in metres", place ? place.radius_m : 100, "number");
+      toolButton(card, "Save place", () => {
+        if (!name.value.trim() || !latitude.value.trim() || !longitude.value.trim() || !radius.value.trim()) throw new Error("Enter a name, both coordinates and a radius.");
+        return contextEdit("places", "save", { ...(place ? { id: place.id, revision: place.revision } : {}), name: name.value, latitude: Number(latitude.value), longitude: Number(longitude.value), radius_m: Number(radius.value) });
+      });
+      if (place) toolButton(card, "Delete place and its derived labels", () => contextEdit("places", "delete", { id: place.id, revision: place.revision }));
+    }
+    placeEditor(null);
+    for (const place of placesReport.places || []) placeEditor(place);
+    toolNode("h3", "Manual event place tags", host);
+    for (const event of placesReport.events || []) {
+      const card = toolNode("section", undefined, host); card.className = "context-card";
+      toolNode("p", event.title || event.event_id, card);
+      const choice = toolNode("select", undefined, card); choice.setAttribute("aria-label", "Event place tag");
+      const blank = toolNode("option", "No manual place tag", choice); blank.value = "";
+      for (const place of placesReport.places || []) { const option = toolNode("option", place.name, choice); option.value = place.id; }
+      choice.value = event.place_id || "";
+      toolButton(card, "Save explicit event tag", () => contextEdit("places", "tag", { event_id: event.event_id, place_id: choice.value || null, revision: event.revision }));
+    }
+  }
   function playReviewSpan(item) {
     if (!item || !item.audio_usable) return;
     const audioPath = "/v1/audio/" + item.chunk_id;
@@ -1805,18 +2035,21 @@ JS = r"""
     const response = await fetch("/v1/turns/" + item.turn_id + "/label", {
       method: "POST",
       headers: { ...authHeaders(), "Content-Type": "application/json" },
-      body: JSON.stringify({ person_id: personId, use_sample: useSample })
+      body: JSON.stringify({ person_id: personId, use_sample: useSample, revision: item.identity_revision ?? reviewIdentityRevision })
     });
     if (!response.ok) {
       reviewError = "Could not confirm that name.";
       renderReview();
       return;
     }
+    const change = await response.json();
+    if (change.change_id) lastIdentityChange = change;
     reviewItems = reviewItems.filter((row) => row.group_id !== item.group_id);
     delete reviewChoices[item.turn_id];
     delete reviewSamples[item.turn_id];
     reviewStatus.textContent = "Confirmed. That name is a human label.";
     renderReview();
+    await loadSpeakerReview(true);
   }
   async function rejectReview(item, personId) {
     reviewError = "";
@@ -1874,6 +2107,7 @@ JS = r"""
       return;
     }
     const page = await response.json();
+    reviewIdentityRevision = page.identity_revision ?? null;
     const incoming = Array.isArray(page.items) ? page.items : [];
     reviewItems = reset ? incoming : reviewItems.concat(incoming);
     reviewCursor = page.next_cursor || null;
@@ -2042,6 +2276,14 @@ JS = r"""
     document.body.classList.toggle("mobile-detail", mobile && view === "recordings" && mobileDetailOpen);
     document.body.classList.toggle("mobile-people", mobile && view === "people");
     if (!mobile) mobileDetailOpen = false;
+    if (view === "context") {
+      library.hidden = true;
+      peopleView.hidden = true;
+      reviewView.hidden = true;
+      contextView.hidden = false;
+      document.body.classList.remove("mobile-list", "mobile-detail", "mobile-people");
+      return;
+    }
     if (view === "review") {
       document.body.classList.remove("mobile-list", "mobile-detail", "mobile-people");
       library.hidden = true;
@@ -2082,12 +2324,15 @@ JS = r"""
   tabRecordings.addEventListener("click", () => setView("recordings"));
   tabReview.addEventListener("click", () => setView("review"));
   tabPeople.addEventListener("click", () => setView("people"));
+  tabContext.addEventListener("click", () => setView("context"));
   document.getElementById("refresh").addEventListener("click", () => {
     loadHealth();
     if (view === "review") loadSpeakerReview(true);
+    else if (view === "context") loadContextTools();
+    else if (view === "people") { loadDay(); loadIdentityTools(); }
     else loadDay();
   });
-  day.addEventListener("change", loadDay);
+  day.addEventListener("change", () => view === "context" ? loadContextTools() : loadDay());
   search.addEventListener("input", render);
   showAll.addEventListener("change", render);
   if (flatList) flatList.addEventListener("change", renderList);
@@ -2288,7 +2533,9 @@ class ViewerHandler(BaseHTTPRequestHandler):
                         if len(raw) != 1:
                             raise ValueError("cursor")
                         cursor = raw[0]
+                    identity_revision = speaker_identity.revision(db)
                     report = speaker_review.review_queue(db, limit=limit, cursor=cursor)
+                    report['identity_revision'] = identity_revision
         except ValueError:
             self._json(400, {"error": "Invalid review request"})
             return True
@@ -2385,6 +2632,20 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(200, {"days": self._inbox().viewer_days()})
         if path == "/v1/health":
             return self._json(200, self._inbox().health_snapshot())
+        if path == "/v1/identity-profiles":
+            return self._json(200, self._inbox().identity_profiles())
+        if path == "/v1/speaker-clusters":
+            return self._json(200, self._inbox().speaker_clusters())
+        if path == "/v1/timeline":
+            query = parse_qs(parsed.query)
+            if set(query) - {"day"} or len(query.get("day", [])) > 1:
+                return self._json(400, {"error": "Invalid timeline query"})
+            try:
+                return self._json(200, self._inbox().timeline_list((query.get("day") or [None])[0]))
+            except event_edits.EditError as error:
+                return self._json(error.status, error.payload)
+        if path == "/v1/places":
+            return self._json(200, self._inbox().places_list())
         if path.startswith("/v1/audio/"):
             chunk_id = path.removeprefix("/v1/audio/")
             row = self._inbox().receipt(chunk_id)
@@ -2453,6 +2714,52 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(400, {"error": "Invalid JSON"})
         if not isinstance(body, dict):
             return self._json(400, {"error": "JSON object required"})
+        if path == '/v1/meeting-markers':
+            try:
+                event, created = self._inbox().store_event(body)
+                return self._json(201 if created else 200, {'event_id': event['event_id'], 'durable': True})
+            except ValueError as error:
+                if type(error).__name__ == 'Conflict':
+                    return self._json(409, {'error': 'Meeting marker conflict'})
+                return self._json(400, {'error': 'Invalid meeting marker'})
+        if path.startswith("/v1/timeline/") or path.startswith("/v1/places/"):
+            kind, action = path.removeprefix("/v1/").split("/", 1)
+            allowed = {"timeline": {"accept", "reject", "split", "merge"},
+                       "places": {"save", "delete", "tag", "clear"}}
+            if action not in allowed[kind]:
+                return self._json(404, {"error": "Unknown context action"})
+            fields = {
+                ("timeline", "accept"): ({"id", "revision"}, {"id", "revision", "title"}),
+                ("timeline", "reject"): ({"id", "revision"}, {"id", "revision"}),
+                ("timeline", "split"): ({"id", "revision", "before_clip_id"}, {"id", "revision", "before_clip_id", "titles"}),
+                ("timeline", "merge"): ({"ids", "revisions", "title"}, {"ids", "revisions", "title"}),
+                ("places", "save"): ({"name", "latitude", "longitude", "radius_m"}, {"id", "revision", "name", "latitude", "longitude", "radius_m"}),
+                ("places", "delete"): ({"id", "revision"}, {"id", "revision"}),
+                ("places", "tag"): ({"event_id", "place_id", "revision"}, {"event_id", "place_id", "revision"}),
+                ("places", "clear"): (set(), {"observation_id", "device_id", "id", "occurred_at"}),
+            }
+            required, accepted = fields[(kind, action)]
+            if not required <= set(body) or set(body) - accepted:
+                return self._json(400, {"error": "Invalid context fields"})
+            if kind == "places" and action == "clear" and set(body) not in ({"observation_id"}, {"device_id", "id", "occurred_at"}):
+                return self._json(400, {"error": "Invalid history selection"})
+            try:
+                mutation = self._inbox().timeline_mutation if kind == "timeline" else self._inbox().place_mutation
+                return self._json(200, mutation(action, body))
+            except event_edits.EditError as error:
+                return self._json(error.status, error.payload)
+            except AgentError as error:
+                return self._json(error.status, {"error": error.message, "code": error.code})
+            except (ValueError, TypeError, KeyError):
+                return self._json(400, {"error": "Invalid context request"})
+        if path.startswith("/v1/identities/"):
+            try:
+                result = self._inbox().identity_mutation(path.removeprefix("/v1/identities/"), body)
+            except speaker_identity.Conflict:
+                return self._json(409, {"error": "Speaker identities changed. Reload before editing."})
+            except (ValueError, TypeError):
+                return self._json(400, {"error": "Invalid identity request"})
+            return self._json(200, result)
         if path == "/v1/event-edits":
             try:
                 return self._json(200, self._inbox().save_event_edit(body))
@@ -2490,10 +2797,16 @@ class ViewerHandler(BaseHTTPRequestHandler):
         if path.startswith("/v1/turns/") and path.endswith("/label"):
             turn_id = path[len("/v1/turns/"):-len("/label")]
             person_id = body.get("person_id", "")
-            if not isinstance(person_id, str):
+            if not isinstance(person_id, str) or set(body) - {"person_id", "use_sample", "revision"}:
                 return self._json(400, {"error": "Invalid person"})
-            if self._inbox().label_turn(turn_id, person_id, body.get("use_sample") is True):
-                return self._json(200, {"labeled": True})
+            try:
+                result = self._inbox().label_turn_change(turn_id, person_id, body.get("use_sample", False), body.get("revision"))
+            except speaker_identity.Conflict:
+                return self._json(409, {"error": "Speaker identities changed. Reload before editing."})
+            except (ValueError, TypeError):
+                return self._json(400, {"error": "Invalid speaker label"})
+            if result:
+                return self._json(200, {"labeled": True, **result})
             return self._json(404, {"error": "Turn or person unavailable"})
         if path.startswith("/v1/chunks/") and path.endswith("/keep"):
             chunk_id = path[len("/v1/chunks/"):-len("/keep")]

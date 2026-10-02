@@ -104,7 +104,58 @@ The viewer's Review tab pages through uncertain speaker turns, prioritizing turn
 
 Sidebar groups come from `display_blocks` in `receiver/viewer.py`. That function only arranges clips already loaded for the day. A group contains at least two transcribed clips on the same America/New_York date, and each following transcribed clip starts within 120 seconds of the previous transcribed clip's end. Blank transcripts stay inside a group only when transcribed clips on both sides join, and they do not extend the gap. A longer gap, a different local date, or an invalid timestamp is its own row. Quiet hours do not split these groups. The visible label is Event. The group id is the first 16 hex characters of the SHA-256 of the joined member ids. Opening a group does not fetch each child recording.
 
-A person can save a title and explicit first and last clip for a group. That edit lives in `event_edits`, separate from automatic grouping, speech-event playback, and capture-session headings. Its id stays stable when the title or boundaries change. A saved boundary wins over automatic grouping, keeps clips that later upload between its anchors, and is not replaced when a summary is regenerated. Automatic grouping stays visible as a suggestion. An edit must stay on one America/New_York day, in time order, cover at least two clips, and must not overlap another edit. Saving sends the revision last read; a mismatch is rejected and nothing is written. The route is human-authenticated. Machine credentials cannot use it. Sidebar names on a group are confirmed speaker assignments only.
+A person can save a title and explicit first and last clip for a group. That edit lives in `event_edits`, separate from automatic grouping, speech-event playback, and capture-session headings. Its id stays stable when the title or boundaries change. A saved boundary wins over automatic grouping, keeps clips that later upload between its anchors, and is not replaced when a summary is regenerated. Explicit human edits may cover one clip or cross midnight; each day shows its portion under the same identity. They must stay in time order and not overlap another edit. Saving sends the revision last read; a mismatch is rejected and nothing is written. The route is human-authenticated. Machine credentials cannot use it. Sidebar names on a group are confirmed speaker assignments only.
+
+### Identity and context controls
+
+People shows accepted sample provenance, readiness, withdrawal and conflict-safe
+undo. Labeling and sample enrollment remain separate. Anonymous cross-recording
+suggestions require a consented, clip/session-separated evaluation; manual
+merge/split/name operations preview selected stretches and never enroll samples.
+`scripts/evaluate-speaker-identity.py` reports correct/false assignments and
+abstentions by pseudonymous identity and condition. Thresholds remain 0.85/0.10;
+two clips, two samples and ten clean seconds are still required.
+
+The phone queues Start/End meeting markers independently of audio. The viewer's
+Context tab exposes inferred closure reasons, human topics and split/merge
+previews. Stable, disjoint confirmed participant changes produce local candidates,
+not proof a meeting ended. Unknown identities do not create a split. Human saved
+boundaries take precedence; source clips and citations are preserved.
+
+Optional cloud topic jobs are separate from summaries. They require
+`LIFE_RECORDER_TOPIC_ANALYSIS=1`, an absolute `LIFE_RECORDER_TOPIC_CLI`, explicit
+`LIFE_RECORDER_TOPIC_MODEL`, and `LIFE_RECORDER_TOPIC_ROUTE_RECEIPT` pointing to a
+private, independently verified recent route receipt. The receipt pins executable
+SHA-256, provider `xai`, effective model, disabled tools/web, and `verified_at`.
+Missing or expired proof disables the job; there is no provider/model fallback.
+Only bounded clip IDs/transcript text go to the process on stdin. One job runs at
+a time after 120 seconds of settling, with bounded retries and validated output.
+Optional failures do not block recording, transcription, retrieval or timeline
+reads. Health reports an unavailable route rather than claiming it is ready.
+
+Known places and explicit event/place tags are human-managed. Phone foreground
+location, background battery trial and motion are separate opt-ins, initially off.
+Location uses a pinned durable context queue and never creates an audio clip.
+Each recording journals an observation ID at capture start; future fixes cannot
+be applied retroactively. Five-minute freshness and uncertainty containment govern
+place candidates. Raw observation coordinates expire after 24 hours; the latest
+phone record clears after that interval. Derived clip labels remain until explicit
+history deletion. Place deletion erases its coordinates and derived labels.
+History deletion also prevents delayed retries from recreating old context.
+Location failure cannot block a durable audio receipt.
+
+`LIFE_RECORDER_LOCATION_CLIENT_IDS` independently permits coordinate-free
+`POST /v1/location/last-known`; responses describe the phone, not a person's
+whereabouts. Transcript-only credentials receive no location access. A search
+with a place filter requires both scopes. Precise-coordinate machine responses
+are unavailable. Existing credentials are not silently granted this new scope.
+
+Background trial requests coarse accuracy, automatic pausing and a 100 m distance
+filter. Transmission is limited to once per minute moving or once per fifteen
+minutes stationary, not guaranteed iOS delivery. Vehicle activity does not mean
+driving. See [physical-device and listening gates](docs/device-trials.md) for
+four-hour battery comparisons, cellular recovery, twelve-pair audio review and
+seven-day quiet-upload evaluation. No gate is satisfied by synthetic tests.
 
 ### Event summaries
 
@@ -138,7 +189,12 @@ Search results include `match`: an exact passage, its clip ID and clip-start tim
 
 `people` and legacy `speaker` fields describe event/clip associations, not attribution of the quoted words. The response marks passage `attribution` as `unknown`; matching names must not be presented as proof of who spoke the excerpt. Clip-start timestamps are not word timings. Existing literal ranking and time/person filters are unchanged.
 
-Run `python3 scripts/evaluate-agent-retrieval.py --baseline-ref eaf160f` for the synthetic 60-case comparison. The first comparison preserved 45 literal hits and the 15 known natural-language/paraphrase misses; match visibility improved from 0 to 45 of those literal hits. This measures excerpt usefulness, not general search accuracy or live remote performance.
+Run `python3 scripts/evaluate-agent-retrieval.py` for the frozen 120-case suite.
+Its auxiliary normalized/stemmed FTS index and IDF-weighted partial coverage are
+offline only. Held-out recall/precision improve from 0.6667/0.6667 to
+0.8333/0.8333, but recall misses the 0.90 target, so ranking remains unreleased.
+The older 60-case comparison preserved 45 literal hits and improved match
+visibility from 0 to 45; that is dated excerpt evidence, not the current benchmark.
 
 Approved agents call `https://lr.genr8ive.ai`. They send `CF-Access-Client-Id` and `CF-Access-Client-Secret` to Cloudflare. The viewer only trusts the `Cf-Access-Jwt-Assertion` Cloudflare adds, and only when that token's `common_name` is listed in `LIFE_RECORDER_AGENT_CLIENT_IDS`. That credential can `POST /v1/search` and `POST /v1/events/{id}/read`. It cannot open a day, play audio, or change anything. Search text goes in the JSON body. Results are short. Exact transcript text is a separate paged read. The global skill `life-recorder` is the agent procedure. An empty allowlist means no agent access.
 

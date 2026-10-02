@@ -2,16 +2,34 @@
 
 Checked items are implemented in source; deployment status is recorded separately in INSTALL-NOTES.md. Unchecked items remain planned, and new permissions are not enabled by this roadmap.
 
+## Prioritized delivery plan — October 2, 2026
+
+The subsequent detailed plan is now implemented in source; deployment evidence
+is recorded in INSTALL-NOTES.md and docs/implementation-20261002.md. Historical
+recordings and voice profiles were not recovered. Experimental acceptance remains
+separate from source completion.
+
+1. **Visible health and source protection.** Health and device-scoped processing status are implemented. The user declined an additional runtime-backup system; Git does not protect recordings, transcripts, profiles or credentials. Private pre-migration safety copies remain required by OPERATIONS.md.
+2. **Complete retrieval coverage, then relevance.** Make a single transcribed clip discoverable without falsely presenting it as a meeting. Keep citations valid through event regrouping. Expand the frozen benchmark with person/time filters, multi-event queries and negative cases before changing lexical ranking; consider local hybrid search only if measured misses justify it. Acceptance: single-clip discovery, valid anchored reads, no unsupported speaker attribution, and measured precision/recall versus baseline.
+3. **Rebuild trustworthy speaker learning.** Provide clear enrollment readiness and explicit sample opt-in, uncertain suggestions, and reversible correction. Evaluate fresh consented samples on held-out recordings, reporting false assignments and abstentions before changing thresholds. Do not train on automatic labels. Cross-clip anonymous clusters, later naming and propagation come after this quality gate, with merge/split/undo and preservation of human corrections.
+4. **Meaningful meeting timeline.** Combine manual start/end hints with suggested boundaries from gaps, participant evidence and topic changes. Keep suggestions editable; protect human overrides and label uncertainty. Acceptance: split/merge cases preserve every transcript span and stable source references, including missed manual end markers. Choose the topic-analysis method before implementation; no new external transcript flow by default.
+5. **Optional place context.** Start with manual places, then opt-in foreground snapshots. Attach the latest observation with age/accuracy rather than forcing GPS each minute. Define expiry and deletion propagation. Last-known phone location requires a separate agent permission; background/motion work follows device battery testing. Acceptance: denied/revoked/stale/delayed fixes never block recording or leak through current transcript credentials.
+
+Separate experiments: compare original/enhanced playback with user listening before restoring enhancement; keep quiet-upload suppression in shadow mode until speech-miss and battery/network measurements support activation. Fresh cellular-only upload testing remains a reliability check, not proof inferred from the successful connected-phone test.
+
+Delivery evidence and remaining real-device/listening gates are tracked separately;
+no remote-backup destination or key custody decision is pending under this scope.
+
 ## Agent transcript retrieval — planned, 2026-09-27
 
 Based on the 2026-09-24 Opus review. Preserve the read-only machine routes and existing authentication boundary.
 
-- [ ] Build approximately 60 synthetic or explicitly consented evaluation questions covering natural-language wording, paraphrases, time/person filters, and multiple events. Preserve a baseline before changing retrieval.
-- [ ] Improve lexical retrieval: evaluate stopword handling, stemming, and partial-term coverage ranking against the current all-terms-required search. Do not assume OR alone improves relevance.
+- [x] Freeze 120 synthetic questions with evidence ranges, tuning/held-out splits, person/time filters, multi-record queries and negatives. Limitations are reported by the evaluator.
+- [x] Evaluate offline normalized/stemmed lexical indexing and weighted partial coverage. Recall 0.8333 misses target 0.90; production ranking is unchanged.
 - [x] Implement match-centered excerpts with event ID, clip ID, clip-start timestamps, exact Unicode text offsets, and unknown passage attribution. Added October 2; live rollout status is recorded in INSTALL-NOTES.md.
 - [x] Implement anchored transcript reads with bounded preceding context, lossless continuation and revision checks. Added October 2; live rollout status is recorded in INSTALL-NOTES.md.
-- [ ] Return per-turn speaker information with confirmed, unconfirmed, and unknown states; never imply that every person in a clip spoke every word.
-- [ ] Verify an authorized remote machine search/read and continued denial of audio, human-only, and mutation routes.
+- [x] Return bounded per-turn speaker/time information with confirmed, unconfirmed, and unknown states; quoted words retain unknown attribution.
+- [x] Verify an authorized remote machine search/read and continued denial of audio, human-only, and mutation routes. Passed during the October 2 rebuild; see INSTALL-NOTES.md.
 - [ ] Consider local hybrid semantic retrieval only if measured paraphrase misses remain after lexical improvements. No new external transcript flow by default.
 
 Proposed targets, subject to evaluation design: recall@10 >= 0.90, precision@5 >= 0.70, zero incorrect speaker attributions in the test set, p95 retrieval < 300 ms on the target Mac, and responses <= 16 KiB. These are goals, not achieved results.

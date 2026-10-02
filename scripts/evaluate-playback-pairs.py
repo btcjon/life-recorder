@@ -16,7 +16,17 @@ def duration(path, ffprobe):
 def evaluate(pairs, ffprobe):
     valid = approved = 0
     failures = []
+    seen = set()
     for index, pair in enumerate(pairs):
+        try:
+            identity = (str(Path(pair['original']).resolve()), str(Path(pair['enhanced']).resolve()))
+        except (KeyError, TypeError, ValueError):
+            failures.append({'pair': index, 'reason': 'pair_validation_failed'})
+            continue
+        if identity in seen or identity[0] == identity[1]:
+            failures.append({'pair': index, 'reason': 'duplicate_or_identical_pair'})
+            continue
+        seen.add(identity)
         if pair.get('consented') is not True:
             failures.append({'pair': index, 'reason': 'consent_missing'})
             continue

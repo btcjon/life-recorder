@@ -59,6 +59,12 @@ pending. See docs/implementation-20261002.md and docs/device-trials.md. These
 are source/receiver results, not a claim that every experimental acceptance gate
 or physical-phone rollout is complete.
 
+Reviewed source and documentation were pushed without force to
+`origin/codex/local-life-recorder` on `btcjon/life-recorder`; remote readback
+matched the pushed HEAD. Upstream was not changed. The later rollout-record
+commit changes documentation only; receiver/iOS source trees match the running
+verified code. Private implementation receipts and probes are ignored under `.tmp/`.
+
 ## 2026-10-02 agent retrieval evidence (source implemented, deployment blocked)
 
 ### Later October 2: authorized isolated rebuild preparation

@@ -4,6 +4,61 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-02 roadmap source and receiver rollout
+
+Implemented health, standalone transcript coverage/source citations, revisioned
+speaker correction/withdrawal/undo, manual phone/viewer meeting controls,
+participant-change candidates, topic worker safeguards, private place context,
+independent agent location scope, and gated experiment tooling. Source is split
+into reviewable commits; receiver code was committed before rollout. Runtime
+recordings, tokens, models and private safety copies remain outside Git. The user
+declined an additional runtime-backup service; Git does not protect runtime data.
+
+Verification: all 322 Python tests passed, including rendered desktop/mobile
+viewer and scope/revision/data-continuity cases. Simulator app build and
+build-for-testing passed, but XCTest execution remains unverified after the
+earlier simulator service failure. The signed device build failed with no Xcode
+account and no cached provisioning profile. The working phone app was not
+replaced; recorder settings, pairing and permissions were not changed.
+
+A refreshed consistent private safety copy contained 54 completed clips.
+Two migration rehearsals passed: second pass unchanged, integrity OK, all event
+IDs and cursor fingerprint preserved, 51 keyed/FTS transcripts and 51 stable
+source citations checked. No live database was restored or replaced.
+
+The local DeepFilterNet executable was restored outside Git. A public-fixture
+duration check differed by 0.03 seconds; this is not representative listening
+approval. The same existing launch job was reloaded to apply the enhancement
+argument, without setup or credential changes. The first bootstrap failed; a
+readback confirmed the job was absent. After restoring the private plist's mode
+0600, bootstrap succeeded. The reload failure's exact cause is not established.
+
+Observed receiver PID 32145 loaded revision `11b7fff32ddcd3fb4c2334e584ddafff764743ba`.
+Upload listens on `*:8766`; viewer stays on `127.0.0.1:8767`. Authenticated upload
+health returns 200 with viewer OK; unauthenticated returns 401. All 54 clips are
+complete; integrity, event IDs, cursor and 51/51 index counts remain intact.
+Retained original audio range returns 206. New human routes return 200 when
+authenticated and 401 otherwise. The receiver error log remained empty.
+
+The existing remote machine credential successfully searches and reads a source
+citation within 16 KiB. Location access remains denied (403), as do nine
+human/audio/mutation probes. Unauthenticated remote access redirects to Access
+(302). Existing transcript credentials were not granted location scope.
+
+Original playback remains the default and recognition/enrollment source.
+Enhancement is a selectable disposable derivative. Topic analysis is disabled:
+no independently verified configured Grok route/model is available. No fallback
+provider/model was chosen. Cross-recording speaker suggestions remain gated on
+consented held-out evidence; background/motion capture remains opt-in; quiet
+suppression remains inactive. Offline lexical recall 0.8333 misses target 0.90,
+so production ranking is unchanged.
+
+Phone install/UI/cellular recovery, four-hour battery runs, consented voice
+evaluation, twelve-pair listening and seven-day quiet-upload evidence remain
+pending. See docs/implementation-20261002.md and docs/device-trials.md. These
+are source/receiver results, not a claim that every experimental acceptance gate
+or physical-phone rollout is complete.
+
 ## 2026-10-02 agent retrieval evidence (source implemented, deployment blocked)
 
 ### Later October 2: authorized isolated rebuild preparation

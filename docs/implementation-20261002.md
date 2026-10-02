@@ -21,7 +21,7 @@ runtime backup system is requested; pre-migration safety copies remain required.
 - [ ] Enhanced playback comparison tooling; listening approval required for default change.
 - [ ] Seven-day quiet-upload evaluation; suppression inactive until the explicit gate passes.
 - [ ] Cellular physical-device receipt/processing/search/playback and recovery check.
-- [ ] Full tests, rendered viewer, migration rehearsal, live receiver rollout and origin readback.
+- [x] Full tests, rendered viewer, two-pass migration rehearsal and live receiver rollout; origin readback is recorded separately.
 
 Absent human listening, consented speaker recordings or duration-based phone
 measurements are pending evidence, never synthetic proof of those gates.

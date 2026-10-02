@@ -112,6 +112,28 @@ Summaries stay off unless the receiver process has `LIFE_RECORDER_REMOTE_SUMMARI
 
 ### Agent search
 
+Every nonempty transcribed clip is searchable, including recordings outside a
+sidebar event. Results identify `kind: recording` or `kind: event`; the existing
+event read route also accepts standalone recording IDs. Each exact match adds
+`citation` (clip ID, SHA-256 transcript revision, capture timestamp and exact
+Unicode offsets) and `clip_read_path`. Copy the citation unchanged into
+`POST /v1/clips/{id}/read` with `mode: transcript`, optional `context_before`
+and `max_chars`; continuation repeats those fields plus the returned cursor.
+Source citations survive event regrouping and naming. Changed source text or
+capture timestamp returns 409; removed/blank sources return 404. Event anchors
+and cursors retain their existing revision checks. Reads also return bounded
+speaker time spans with confirmed/unconfirmed/unknown identity states, separate
+from quoted text; word attribution remains unknown.
+
+The frozen 120-case `tests/fixtures/agent-retrieval-v2.json` includes explicit
+Unicode evidence ranges, single recordings, multiple-record relevance,
+person/time filters and negative cases. Its unique-marker wording remains a
+synthetic limitation. The evaluator compares current coverage-complete strict
+literal search with an offline lexical experiment. The experiment cannot be
+enabled through HTTP; its synthetic scores do not establish production ranking
+quality. `--baseline-ref` now records an informational historical reference;
+the earlier 60-case historical comparison below remains dated evidence.
+
 Search results include `match`: an exact passage, its clip ID and clip-start timestamp, and half-open `start_offset`/`end_offset` measured in Unicode code points (not bytes or audio seconds). `match.anchor` can open that passage with `POST /v1/events/{id}/read` using `{"mode":"transcript","anchor":{...},"context_before":160,"max_chars":2000}`. Copy the returned anchor unchanged. Continue by sending the same anchor, context and size plus `next_cursor` as `cursor`. Changed event revisions return 409; invalid clip membership or offsets return 400. Context is bounded within the matched clip; pagination then continues through subsequent clips. Every returned excerpt carries exact offsets.
 
 `people` and legacy `speaker` fields describe event/clip associations, not attribution of the quoted words. The response marks passage `attribution` as `unknown`; matching names must not be presented as proof of who spoke the excerpt. Clip-start timestamps are not word timings. Existing literal ranking and time/person filters are unchanged.

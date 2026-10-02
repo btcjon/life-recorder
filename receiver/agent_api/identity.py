@@ -321,7 +321,15 @@ def note_speaker_change(db, chunk_ids) -> None:
         if live is not None:
             break
     if live is None:
-        return
+        # A singleton transcript is searchable even without event membership.
+        # Its person filter changes must invalidate search continuation too.
+        for batch in _batches(ids):
+            placeholders = ",".join("?" for _ in batch)
+            live = db.execute(f"SELECT 1 FROM agent_transcripts WHERE chunk_id IN ({placeholders}) LIMIT 1", batch).fetchone()
+            if live is not None:
+                break
+        if live is None:
+            return
     for batch in _batches(ids):
         placeholders = ",".join("?" for _ in batch)
         db.execute(

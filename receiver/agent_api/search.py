@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import sqlite3
 import uuid
@@ -136,13 +137,31 @@ def _evidence(item: dict, width: int = 480) -> dict:
     hit = item["match_offset"]
     start = max(0, hit - width // 3)
     end = min(len(text), start + width)
-    return {
+    evidence = {
         "chunk_id": item["chunk_id"], "start": _show(item["chunk_start"]),
         "text": text[start:end], "start_offset": start, "end_offset": end,
         "offset_unit": "unicode_code_points", "attribution": "unknown",
+        "clip_read_path": "/v1/clips/" + item["chunk_id"] + "/read",
         "anchor": {"chunk_id": item["chunk_id"], "offset": hit,
                    "revision": item["revision"]},
     }
+    evidence["citation"] = clip_citation(item["chunk_id"], text, item["chunk_start"], start, end)
+    return evidence
+
+
+def transcript_revision(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def recording_revision(text: str) -> int:
+    """Legacy event anchors need a bounded integer even for singleton records."""
+    return int(transcript_revision(text)[:15], 16) % 999999999 + 1
+
+
+def clip_citation(chunk_id, text, stamp, start, end):
+    return {"chunk_id": chunk_id, "transcript_revision": transcript_revision(text),
+            "start_offset": start, "end_offset": end,
+            "captured_at": _show(stamp), "offset_unit": "unicode_code_points"}
 
 
 def _preview(evidence: dict) -> str:
@@ -155,9 +174,16 @@ def _preview(evidence: dict) -> str:
     return " ".join(word.group() for word in words[start:start + 60])
 
 
-def search_events(db_path, body: dict) -> dict:
+def search_events(db_path, body: dict, *, experimental_lexical: bool = False) -> dict:
     request = schemas.parse_search(body)
     tokens = _tokens(request["query"])
+    if experimental_lexical:
+        # Offline evaluator only: no HTTP field enables this candidate.
+        stop = {"when", "did", "we", "discuss", "what", "was", "the", "about", "please", "find", "said", "where"}
+        aliases = {"authorization": "approval", "spending": "budget", "hiring": "recruitment"}
+        tokens = [aliases.get(token.casefold(), token) for token in tokens if token.casefold() not in stop]
+        if request["query"].strip() and not tokens:
+            return {"events": [], "next_cursor": None}
     db = open_read(db_path)
     try:
         db.execute("BEGIN")
@@ -171,6 +197,7 @@ def search_events(db_path, body: dict) -> dict:
             "person": request["person"].casefold(),
             "include_unconfirmed": request["include_unconfirmed"],
             "limit": request["limit"],
+            "experimental_lexical": experimental_lexical,
         })
         offset_key = None
         if request["cursor"]:
@@ -197,11 +224,12 @@ def search_events(db_path, body: dict) -> dict:
             evidence = _evidence(item)
             events.append({
                 "id": item["id"],
+                "kind": item["kind"],
                 "start": _show(item["start"]),
                 "end": _show(item["end"]),
                 "preview": _preview(evidence),
                 "match": evidence,
-                "people_scope": "event_associations",
+                "people_scope": "clip_associations" if item["kind"] == "recording" else "event_associations",
                 "people": item["people"],
             })
         next_cursor = None
@@ -214,8 +242,8 @@ def search_events(db_path, body: dict) -> dict:
             })
         payload = {"events": events, "next_cursor": next_cursor}
         width = 480
-        while len(_dumps(payload)) > RESPONSE_LIMIT and width > 0:
-            width //= 2
+        while len(_dumps(payload)) > RESPONSE_LIMIT and width > 1:
+            width = max(1, width // 2)
             for event, item in zip(payload["events"], page):
                 event["match"] = _evidence(item, width)
                 event["preview"] = _preview(event["match"])
@@ -290,14 +318,11 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
         ]
     else:
         membership = _live_members(db)
-        if not membership:
-            return []
-        chunk_rows = _query_in(
-            db,
-            """SELECT id, started, COALESCE(transcript, '') AS transcript FROM chunks
-                WHERE id IN ({placeholders})""",
-            list(membership),
-        )
+        chunk_rows = db.execute("SELECT id, started, COALESCE(transcript, '') AS transcript FROM chunks WHERE TRIM(COALESCE(transcript, '')) != ''").fetchall()
+    # Sidebar grouping is presentation, not a condition for corpus coverage.
+    for row in chunk_rows:
+        if (row["transcript"] or "").strip():
+            membership.setdefault(row["id"], "rec_" + row["id"])
     chunks = {row["id"]: row for row in chunk_rows}
     scoped = list(chunks)
     names = _chunk_people(db, request["include_unconfirmed"], scoped)
@@ -347,8 +372,12 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
     results = []
     for event_id, bucket in grouped.items():
         event = events.get(event_id)
-        if event is None or not bucket["chunks"]:
+        if not bucket["chunks"]:
             continue
+        recording = event is None
+        if recording:
+            event = {"start_at": None, "end_at": None,
+                     "revision": recording_revision(bucket["chunks"][0]["transcript"])}
         best = min(item["score"] for item in bucket["chunks"])
         earliest = min(bucket["chunks"], key=lambda item: (item["start"], item["id"]))
         relevant = min(bucket["chunks"], key=lambda item: (item["score"], item["start"], item["id"]))
@@ -360,12 +389,13 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
             sort = (-(start.timestamp() if start else 0), event_id)
         results.append({
             "id": event_id,
+            "kind": "recording" if recording else "event",
             "start": start,
             "end": end,
             "preview": relevant["transcript"],
             "chunk_id": relevant["id"], "chunk_start": relevant["start"],
             "match_offset": relevant["match_offset"], "revision": event["revision"],
-            "people": _people(db, member_ids.get(event_id, []), request["include_unconfirmed"]),
+            "people": _people(db, member_ids.get(event_id, [relevant["id"]]), request["include_unconfirmed"]),
             "sort": sort,
         })
     return results

@@ -8,7 +8,7 @@ from access_auth import AccessAuthError, VerificationUnavailable
 from agent_api.auth import allowlist, classify_claims
 from agent_api.errors import AgentError
 from agent_api.rate_limit import Limiter
-from agent_api.read import read_event
+from agent_api.read import read_event, read_clip
 from agent_api.schemas import MAX_BODY_BYTES
 from agent_api.search import search_events
 
@@ -59,6 +59,10 @@ def _route(path: str):
     if path == "/v1/search":
         return "search", None
     marker = "/v1/events/"
+    clip_marker = "/v1/clips/"
+    if path.startswith(clip_marker) and path.endswith(_EVENT_READ):
+        chunk_id = path[len(clip_marker):-len(_EVENT_READ)]
+        return ("clip", chunk_id) if chunk_id and "/" not in chunk_id else ("invalid", None)
     if path.startswith(marker) and path.endswith(_EVENT_READ):
         event_id = path[len(marker):-len(_EVENT_READ)]
         if "/" in event_id or not event_id:
@@ -133,6 +137,8 @@ def intercept(handler, method: str) -> bool:
             payload = search_events(inbox.db, body)
         elif route == "invalid":
             raise AgentError(400, "invalid_input", "Event id is not valid.")
+        elif route == "clip":
+            payload = read_clip(inbox.db, event_id, body)
         else:
             payload = read_event(inbox.db, event_id, body)
     except AgentError as error:

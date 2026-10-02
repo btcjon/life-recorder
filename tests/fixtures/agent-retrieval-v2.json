@@ -1,0 +1,3156 @@
+{
+  "version": 2,
+  "description": "Frozen synthetic 120-case fixture with source evidence ranges and multiple-record relevance. Unique markers still limit natural-language/generalization claims. Tuning/heldout split assigned before candidate evaluation.",
+  "cases": [
+    {
+      "id": "case-000",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-0",
+      "started": "2026-01-01T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker0: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker0 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-0"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-0",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-001",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-1",
+      "started": "2026-01-01T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker1: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker1 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-1"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-1",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-002",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-2",
+      "started": "2026-01-01T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker2: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker2 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-2"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-2",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-003",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-3",
+      "started": "2026-01-01T06:00:00.000Z",
+      "transcript": "😀 Café meeting marker3: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Confirmed Person",
+      "confirmed": true,
+      "request": {
+        "query": "marker3 budget",
+        "limit": 10,
+        "person": "Confirmed Person",
+        "include_unconfirmed": false
+      },
+      "relevant_chunk_ids": [
+        "fixture-3"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-3",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-004",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-4",
+      "started": "2026-01-01T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker4: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker4 budget",
+        "limit": 10,
+        "from": "2026-01-01T08:00:00.000Z",
+        "to": "2026-01-01T08:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-4"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-4",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-005",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-5",
+      "started": "2026-01-01T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker5: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-01T10:00:00.000Z",
+        "to": "2026-01-01T16:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-5",
+        "fixture-6",
+        "fixture-7"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-5",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-6",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-7",
+          "start_offset": 16,
+          "end_offset": 31,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-006",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-6",
+      "started": "2026-01-01T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker6: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing6 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-007",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-7",
+      "started": "2026-01-01T14:00:00.000Z",
+      "transcript": "Revised marker7 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete7",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-008",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-8",
+      "started": "2026-01-01T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker8: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker8 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-8"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-8",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-009",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-9",
+      "started": "2026-01-01T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker9: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker9 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-9"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-9",
+          "start_offset": 24,
+          "end_offset": 39,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-010",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-10",
+      "started": "2026-01-01T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker10: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker10 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-10"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-10",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-011",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-11",
+      "started": "2026-01-01T22:00:00.000Z",
+      "transcript": "😀 Café meeting marker11: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker11 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-11"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-11",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-012",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-12",
+      "started": "2026-01-02T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker12: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker12 budget",
+        "limit": 10,
+        "from": "2026-01-02T00:00:00.000Z",
+        "to": "2026-01-02T00:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-12"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-12",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-013",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-13",
+      "started": "2026-01-02T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker13: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-02T02:00:00.000Z",
+        "to": "2026-01-02T08:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-13",
+        "fixture-14",
+        "fixture-15"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-13",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-14",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-15",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-014",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-14",
+      "started": "2026-01-02T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker14: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing14 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-015",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-15",
+      "started": "2026-01-02T06:00:00.000Z",
+      "transcript": "Revised marker15 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete15",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-016",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-16",
+      "started": "2026-01-02T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker16: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker16 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-16"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-16",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-017",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-17",
+      "started": "2026-01-02T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker17: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker17 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-17"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-17",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-018",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-18",
+      "started": "2026-01-02T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker18: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker18 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-18"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-18",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-019",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-19",
+      "started": "2026-01-02T14:00:00.000Z",
+      "transcript": "😀 Café meeting marker19: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker19 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-19"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-19",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-020",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-20",
+      "started": "2026-01-02T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker20: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker20 budget",
+        "limit": 10,
+        "from": "2026-01-02T16:00:00.000Z",
+        "to": "2026-01-02T16:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-20"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-20",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-021",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-21",
+      "started": "2026-01-02T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker21: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-02T18:00:00.000Z",
+        "to": "2026-01-03T00:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-21",
+        "fixture-22",
+        "fixture-23"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-21",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-22",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-23",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-022",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-22",
+      "started": "2026-01-02T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker22: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing22 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-023",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-23",
+      "started": "2026-01-02T22:00:00.000Z",
+      "transcript": "Revised marker23 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete23",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-024",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-24",
+      "started": "2026-01-03T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker24: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker24 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-24"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-24",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-025",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-25",
+      "started": "2026-01-03T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker25: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker25 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-25"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-25",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-026",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-26",
+      "started": "2026-01-03T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker26: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker26 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-26"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-26",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-027",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-27",
+      "started": "2026-01-03T06:00:00.000Z",
+      "transcript": "😀 Café meeting marker27: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Confirmed Person",
+      "confirmed": true,
+      "request": {
+        "query": "marker27 budget",
+        "limit": 10,
+        "person": "Confirmed Person",
+        "include_unconfirmed": false
+      },
+      "relevant_chunk_ids": [
+        "fixture-27"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-27",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-028",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-28",
+      "started": "2026-01-03T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker28: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker28 budget",
+        "limit": 10,
+        "from": "2026-01-03T08:00:00.000Z",
+        "to": "2026-01-03T08:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-28"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-28",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-029",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-29",
+      "started": "2026-01-03T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker29: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-03T10:00:00.000Z",
+        "to": "2026-01-03T16:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-29",
+        "fixture-30",
+        "fixture-31"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-29",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-30",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-31",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-030",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-30",
+      "started": "2026-01-03T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker30: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing30 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-031",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-31",
+      "started": "2026-01-03T14:00:00.000Z",
+      "transcript": "Revised marker31 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete31",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-032",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-32",
+      "started": "2026-01-03T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker32: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker32 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-32"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-32",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-033",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-33",
+      "started": "2026-01-03T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker33: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker33 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-33"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-33",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-034",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-34",
+      "started": "2026-01-03T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker34: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker34 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-34"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-34",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-035",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-35",
+      "started": "2026-01-03T22:00:00.000Z",
+      "transcript": "😀 Café meeting marker35: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker35 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-35"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-35",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-036",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-36",
+      "started": "2026-01-04T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker36: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker36 budget",
+        "limit": 10,
+        "from": "2026-01-04T00:00:00.000Z",
+        "to": "2026-01-04T00:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-36"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-36",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-037",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-37",
+      "started": "2026-01-04T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker37: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-04T02:00:00.000Z",
+        "to": "2026-01-04T08:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-37",
+        "fixture-38",
+        "fixture-39"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-37",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-38",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-39",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-038",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-38",
+      "started": "2026-01-04T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker38: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing38 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-039",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-39",
+      "started": "2026-01-04T06:00:00.000Z",
+      "transcript": "Revised marker39 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete39",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-040",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-40",
+      "started": "2026-01-04T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker40: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker40 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-40"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-40",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-041",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-41",
+      "started": "2026-01-04T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker41: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker41 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-41"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-41",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-042",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-42",
+      "started": "2026-01-04T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker42: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker42 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-42"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-42",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-043",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-43",
+      "started": "2026-01-04T14:00:00.000Z",
+      "transcript": "😀 Café meeting marker43: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker43 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-43"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-43",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-044",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-44",
+      "started": "2026-01-04T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker44: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker44 budget",
+        "limit": 10,
+        "from": "2026-01-04T16:00:00.000Z",
+        "to": "2026-01-04T16:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-44"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-44",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-045",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-45",
+      "started": "2026-01-04T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker45: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-04T18:00:00.000Z",
+        "to": "2026-01-05T00:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-45",
+        "fixture-46",
+        "fixture-47"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-45",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-46",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-47",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-046",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-46",
+      "started": "2026-01-04T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker46: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing46 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-047",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-47",
+      "started": "2026-01-04T22:00:00.000Z",
+      "transcript": "Revised marker47 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete47",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-048",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-48",
+      "started": "2026-01-05T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker48: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker48 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-48"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-48",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-049",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-49",
+      "started": "2026-01-05T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker49: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker49 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-49"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-49",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-050",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-50",
+      "started": "2026-01-05T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker50: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker50 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-50"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-50",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-051",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-51",
+      "started": "2026-01-05T06:00:00.000Z",
+      "transcript": "😀 Café meeting marker51: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Confirmed Person",
+      "confirmed": true,
+      "request": {
+        "query": "marker51 budget",
+        "limit": 10,
+        "person": "Confirmed Person",
+        "include_unconfirmed": false
+      },
+      "relevant_chunk_ids": [
+        "fixture-51"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-51",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-052",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-52",
+      "started": "2026-01-05T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker52: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker52 budget",
+        "limit": 10,
+        "from": "2026-01-05T08:00:00.000Z",
+        "to": "2026-01-05T08:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-52"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-52",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-053",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-53",
+      "started": "2026-01-05T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker53: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-05T10:00:00.000Z",
+        "to": "2026-01-05T16:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-53",
+        "fixture-54",
+        "fixture-55"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-53",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-54",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-55",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-054",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-54",
+      "started": "2026-01-05T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker54: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing54 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-055",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-55",
+      "started": "2026-01-05T14:00:00.000Z",
+      "transcript": "Revised marker55 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete55",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-056",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-56",
+      "started": "2026-01-05T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker56: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker56 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-56"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-56",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-057",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-57",
+      "started": "2026-01-05T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker57: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker57 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-57"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-57",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-058",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-58",
+      "started": "2026-01-05T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker58: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker58 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-58"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-58",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-059",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-59",
+      "started": "2026-01-05T22:00:00.000Z",
+      "transcript": "😀 Café meeting marker59: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker59 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-59"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-59",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-060",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-60",
+      "started": "2026-01-06T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker60: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker60 budget",
+        "limit": 10,
+        "from": "2026-01-06T00:00:00.000Z",
+        "to": "2026-01-06T00:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-60"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-60",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-061",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-61",
+      "started": "2026-01-06T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker61: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-06T02:00:00.000Z",
+        "to": "2026-01-06T08:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-61",
+        "fixture-62",
+        "fixture-63"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-61",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-62",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-63",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-062",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-62",
+      "started": "2026-01-06T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker62: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing62 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-063",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-63",
+      "started": "2026-01-06T06:00:00.000Z",
+      "transcript": "Revised marker63 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete63",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-064",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-64",
+      "started": "2026-01-06T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker64: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker64 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-64"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-64",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-065",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-65",
+      "started": "2026-01-06T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker65: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker65 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-65"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-65",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-066",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-66",
+      "started": "2026-01-06T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker66: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker66 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-66"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-66",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-067",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-67",
+      "started": "2026-01-06T14:00:00.000Z",
+      "transcript": "😀 Café meeting marker67: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker67 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-67"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-67",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-068",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-68",
+      "started": "2026-01-06T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker68: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker68 budget",
+        "limit": 10,
+        "from": "2026-01-06T16:00:00.000Z",
+        "to": "2026-01-06T16:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-68"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-68",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-069",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-69",
+      "started": "2026-01-06T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker69: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-06T18:00:00.000Z",
+        "to": "2026-01-07T00:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-69",
+        "fixture-70",
+        "fixture-71"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-69",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-70",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-71",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-070",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-70",
+      "started": "2026-01-06T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker70: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing70 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-071",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-71",
+      "started": "2026-01-06T22:00:00.000Z",
+      "transcript": "Revised marker71 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete71",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-072",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-72",
+      "started": "2026-01-07T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker72: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker72 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-72"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-72",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-073",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-73",
+      "started": "2026-01-07T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker73: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker73 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-73"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-73",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-074",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-74",
+      "started": "2026-01-07T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker74: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker74 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-74"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-74",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-075",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-75",
+      "started": "2026-01-07T06:00:00.000Z",
+      "transcript": "😀 Café meeting marker75: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Confirmed Person",
+      "confirmed": true,
+      "request": {
+        "query": "marker75 budget",
+        "limit": 10,
+        "person": "Confirmed Person",
+        "include_unconfirmed": false
+      },
+      "relevant_chunk_ids": [
+        "fixture-75"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-75",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-076",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-76",
+      "started": "2026-01-07T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker76: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker76 budget",
+        "limit": 10,
+        "from": "2026-01-07T08:00:00.000Z",
+        "to": "2026-01-07T08:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-76"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-76",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-077",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-77",
+      "started": "2026-01-07T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker77: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-07T10:00:00.000Z",
+        "to": "2026-01-07T16:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-77",
+        "fixture-78",
+        "fixture-79"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-77",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-78",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-79",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-078",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-78",
+      "started": "2026-01-07T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker78: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing78 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-079",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-79",
+      "started": "2026-01-07T14:00:00.000Z",
+      "transcript": "Revised marker79 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete79",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-080",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-80",
+      "started": "2026-01-07T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker80: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker80 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-80"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-80",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-081",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-81",
+      "started": "2026-01-07T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker81: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker81 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-81"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-81",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-082",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-82",
+      "started": "2026-01-07T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker82: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker82 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-82"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-82",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-083",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-83",
+      "started": "2026-01-07T22:00:00.000Z",
+      "transcript": "😀 Café meeting marker83: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker83 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-83"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-83",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-084",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-84",
+      "started": "2026-01-08T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker84: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker84 budget",
+        "limit": 10,
+        "from": "2026-01-08T00:00:00.000Z",
+        "to": "2026-01-08T00:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-84"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-84",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-085",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-85",
+      "started": "2026-01-08T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker85: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-08T02:00:00.000Z",
+        "to": "2026-01-08T08:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-85",
+        "fixture-86",
+        "fixture-87"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-85",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-86",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-87",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-086",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-86",
+      "started": "2026-01-08T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker86: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing86 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-087",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-87",
+      "started": "2026-01-08T06:00:00.000Z",
+      "transcript": "Revised marker87 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete87",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-088",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-88",
+      "started": "2026-01-08T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker88: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker88 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-88"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-88",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-089",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-89",
+      "started": "2026-01-08T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker89: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker89 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-89"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-89",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-090",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-90",
+      "started": "2026-01-08T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker90: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker90 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-90"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-90",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-091",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-91",
+      "started": "2026-01-08T14:00:00.000Z",
+      "transcript": "😀 Café meeting marker91: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker91 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-91"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-91",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-092",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-92",
+      "started": "2026-01-08T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker92: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker92 budget",
+        "limit": 10,
+        "from": "2026-01-08T16:00:00.000Z",
+        "to": "2026-01-08T16:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-92"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-92",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-093",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-93",
+      "started": "2026-01-08T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker93: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-08T18:00:00.000Z",
+        "to": "2026-01-09T00:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-93",
+        "fixture-94",
+        "fixture-95"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-93",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-94",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-95",
+          "start_offset": 17,
+          "end_offset": 32,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-094",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-94",
+      "started": "2026-01-08T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker94: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing94 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-095",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-95",
+      "started": "2026-01-08T22:00:00.000Z",
+      "transcript": "Revised marker95 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete95",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-096",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-96",
+      "started": "2026-01-09T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker96: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker96 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-96"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-96",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-097",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-97",
+      "started": "2026-01-09T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker97: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker97 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-97"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-97",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-098",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-98",
+      "started": "2026-01-09T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker98: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker98 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-98"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-98",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-099",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-99",
+      "started": "2026-01-09T06:00:00.000Z",
+      "transcript": "😀 Café meeting marker99: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Confirmed Person",
+      "confirmed": true,
+      "request": {
+        "query": "marker99 budget",
+        "limit": 10,
+        "person": "Confirmed Person",
+        "include_unconfirmed": false
+      },
+      "relevant_chunk_ids": [
+        "fixture-99"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-99",
+          "start_offset": 25,
+          "end_offset": 40,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-100",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-100",
+      "started": "2026-01-09T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker100: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker100 budget",
+        "limit": 10,
+        "from": "2026-01-09T08:00:00.000Z",
+        "to": "2026-01-09T08:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-100"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-100",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-101",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-101",
+      "started": "2026-01-09T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker101: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-09T10:00:00.000Z",
+        "to": "2026-01-09T16:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-101",
+        "fixture-102",
+        "fixture-103"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-101",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-102",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-103",
+          "start_offset": 18,
+          "end_offset": 33,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-102",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-102",
+      "started": "2026-01-09T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker102: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing102 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-103",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-103",
+      "started": "2026-01-09T14:00:00.000Z",
+      "transcript": "Revised marker103 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete103",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-104",
+      "split": "heldout",
+      "category": "literal",
+      "chunk_id": "fixture-104",
+      "started": "2026-01-09T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker104: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker104 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-104"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-104",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-105",
+      "split": "heldout",
+      "category": "natural_language",
+      "chunk_id": "fixture-105",
+      "started": "2026-01-09T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker105: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker105 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-105"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-105",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-106",
+      "split": "heldout",
+      "category": "paraphrase",
+      "chunk_id": "fixture-106",
+      "started": "2026-01-09T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker106: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker106 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-106"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-106",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-107",
+      "split": "heldout",
+      "category": "person",
+      "chunk_id": "fixture-107",
+      "started": "2026-01-09T22:00:00.000Z",
+      "transcript": "😀 Café meeting marker107: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker107 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-107"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-107",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-108",
+      "split": "heldout",
+      "category": "time",
+      "chunk_id": "fixture-108",
+      "started": "2026-01-10T00:00:00.000Z",
+      "transcript": "😀 Café meeting marker108: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker108 budget",
+        "limit": 10,
+        "from": "2026-01-10T00:00:00.000Z",
+        "to": "2026-01-10T00:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-108"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-108",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-109",
+      "split": "heldout",
+      "category": "multiple_events",
+      "chunk_id": "fixture-109",
+      "started": "2026-01-10T02:00:00.000Z",
+      "transcript": "😀 Café meeting marker109: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-10T02:00:00.000Z",
+        "to": "2026-01-10T08:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-109",
+        "fixture-110",
+        "fixture-111"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-109",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-110",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-111",
+          "start_offset": 18,
+          "end_offset": 33,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-110",
+      "split": "heldout",
+      "category": "negative",
+      "chunk_id": "fixture-110",
+      "started": "2026-01-10T04:00:00.000Z",
+      "transcript": "😀 Café meeting marker110: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing110 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-111",
+      "split": "heldout",
+      "category": "revision",
+      "chunk_id": "fixture-111",
+      "started": "2026-01-10T06:00:00.000Z",
+      "transcript": "Revised marker111 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete111",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-112",
+      "split": "tuning",
+      "category": "literal",
+      "chunk_id": "fixture-112",
+      "started": "2026-01-10T08:00:00.000Z",
+      "transcript": "😀 Café meeting marker112: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker112 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-112"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-112",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-113",
+      "split": "tuning",
+      "category": "natural_language",
+      "chunk_id": "fixture-113",
+      "started": "2026-01-10T10:00:00.000Z",
+      "transcript": "😀 Café meeting marker113: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "when did we discuss marker113 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-113"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-113",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-114",
+      "split": "tuning",
+      "category": "paraphrase",
+      "chunk_id": "fixture-114",
+      "started": "2026-01-10T12:00:00.000Z",
+      "transcript": "😀 Café meeting marker114: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker114 spending authorization",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-114"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-114",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-115",
+      "split": "tuning",
+      "category": "person",
+      "chunk_id": "fixture-115",
+      "started": "2026-01-10T14:00:00.000Z",
+      "transcript": "😀 Café meeting marker115: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": "Suggested Person",
+      "confirmed": false,
+      "request": {
+        "query": "marker115 budget",
+        "limit": 10,
+        "person": "Suggested Person",
+        "include_unconfirmed": true
+      },
+      "relevant_chunk_ids": [
+        "fixture-115"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-115",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-116",
+      "split": "tuning",
+      "category": "time",
+      "chunk_id": "fixture-116",
+      "started": "2026-01-10T16:00:00.000Z",
+      "transcript": "😀 Café meeting marker116: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "marker116 budget",
+        "limit": 10,
+        "from": "2026-01-10T16:00:00.000Z",
+        "to": "2026-01-10T16:01:00.000Z"
+      },
+      "relevant_chunk_ids": [
+        "fixture-116"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-116",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-117",
+      "split": "tuning",
+      "category": "multiple_events",
+      "chunk_id": "fixture-117",
+      "started": "2026-01-10T18:00:00.000Z",
+      "transcript": "😀 Café meeting marker117: budget approval recruitment. Closing notes.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "budget approval",
+        "from": "2026-01-10T18:00:00.000Z",
+        "to": "2026-01-11T00:00:00.000Z",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [
+        "fixture-117",
+        "fixture-118",
+        "fixture-119"
+      ],
+      "expected_evidence": [
+        {
+          "chunk_id": "fixture-117",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-118",
+          "start_offset": 26,
+          "end_offset": 41,
+          "text": "budget approval"
+        },
+        {
+          "chunk_id": "fixture-119",
+          "start_offset": 18,
+          "end_offset": 33,
+          "text": "budget approval"
+        }
+      ]
+    },
+    {
+      "id": "case-118",
+      "split": "tuning",
+      "category": "negative",
+      "chunk_id": "fixture-118",
+      "started": "2026-01-10T20:00:00.000Z",
+      "transcript": "😀 Café meeting marker118: budget approval recruitment. Closing notes.",
+      "grouped": true,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "missing118 budget",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    },
+    {
+      "id": "case-119",
+      "split": "tuning",
+      "category": "revision",
+      "chunk_id": "fixture-119",
+      "started": "2026-01-10T22:00:00.000Z",
+      "transcript": "Revised marker119 budget approval.",
+      "grouped": false,
+      "person": null,
+      "confirmed": false,
+      "request": {
+        "query": "obsolete119",
+        "limit": 10
+      },
+      "relevant_chunk_ids": [],
+      "expected_evidence": []
+    }
+  ]
+}

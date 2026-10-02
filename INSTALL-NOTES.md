@@ -6,6 +6,46 @@ Two statements later in this journal described the 2026-09-19 install and are no
 
 ## 2026-10-02 roadmap source and receiver rollout
 
+### Verified launch-source repair, 17:48 UTC
+
+After the Mac reboot, PID 922 was healthy but its one-shot Git source lookup
+reported unavailable. The exact startup lookup failure was not established;
+the running process could not be retrospectively attested.
+
+Receiver source now launches from a private readonly exact-commit release, not
+the mutable Dropbox checkout. Its manifest hashes all 31 Python files and four
+exact viewer PNG assets; the existing launch plist independently pins the
+manifest SHA. Validation occurs before application imports, fails to explicit
+unavailable provenance for changed/unmanaged source, and is cached for the
+process lifetime. Attestation passed with Git unavailable. No runtime data,
+credentials, recordings or database are packaged.
+
+Final Python suite: 363 tests passed. The package rehearsal caught missing
+viewer assets before any job change; the repaired exact asset allowlist and
+tamper checks passed. Symlink-path regression tests also passed. Fresh private
+consistent safety copy: 56 complete clips, integrity OK. Two migration passes
+preserved event IDs/cursor and all 53 keyed/FTS transcripts/source citations;
+the second pass was unchanged. The archive accompanying that copy is explicitly
+a committed rollback candidate, not proof of PID 922's unknown loaded revision.
+
+Only the existing job's script argument and manifest-pin environment key changed.
+Its bootout/bootstrap reload succeeded, yielding PID 10181 and verified revision
+`9f4ef5958a2e43b3d09bbde159cf6c4c18471ded`. All 35 release files matched the
+exact commit; no bytecode cache was present. Authenticated health 200/viewer OK,
+unauthenticated 401; 56 complete clips, integrity OK, 53/53 indexes and
+event/cursor continuity preserved. Four viewer icons matched committed bytes;
+original audio range playback returned 206. Listeners remain `*:8766` and
+`127.0.0.1:8767`. Remote machine search/citation reads returned 200 within budget;
+location and nine human/audio/mutation probes remained denied, unauthenticated
+remote access redirected to login. No phone reinstall, pairing, credentials,
+permissions, retention, playback default or enrollment changed.
+
+The user's earlier Wi-Fi-off test produced a fresh 9.3-second clip with one
+verified durable ingestion and complete processing, remote search/citation and
+original playback. This is not temporary-disconnection recovery evidence.
+Consented voice evaluation, listening approval, matched four-hour battery runs
+and seven representative shadow days remain human-dependent acceptance gates.
+
 ### Completion source and topic rollout, 16:41 UTC
 
 Supersedes the earlier topic-route and XCTest gaps below. Final receiver suite:

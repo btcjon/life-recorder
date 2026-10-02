@@ -83,9 +83,21 @@ check, not twelve representative pairs or listening approval. Enhanced playback
 is only a selectable disposable derivative; the original remains the default
 and all recognition/enrollment input.
 
+## Verified launch-source repair
+
+The post-reboot receiver's source revision was unavailable; no claim was made
+about its unknown loaded code. The new readonly exact-commit release validates
+all 31 Python files and four viewer PNGs against an independently pinned manifest
+before imports, without Git, and caches that identity. Final suite: 363 Python
+tests passed. Live reload verified source identity, all 56 completed recordings,
+53/53 transcript indexes, database integrity, event/cursor continuity, source
+citations, original playback and unchanged machine-access denials. The private
+source artifact is not a runtime backup service; no recording or opt-in changed.
+
 ## Remaining acceptance gates
 
-- Physical phone controls and fresh cellular/disconnection/recovery evidence.
+- Physical phone controls and temporary-disconnection/recovery evidence; the
+  fresh user-confirmed Wi-Fi-off upload passed independently.
 - Consented enrollment and held-out recordings covering noise, distance, brief
   and overlapping speech and unknown people; report correct/false/abstained
   outcomes per pseudonymous identity and condition. Clustering suggestions remain off.

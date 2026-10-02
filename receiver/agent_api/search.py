@@ -195,6 +195,7 @@ def search_events(db_path, body: dict, *, experimental_lexical: bool = False) ->
             "start": request["start"].isoformat() if request["start"] else None,
             "end": request["end"].isoformat() if request["end"] else None,
             "person": request["person"].casefold(),
+            "place": request["place"].casefold(),
             "include_unconfirmed": request["include_unconfirmed"],
             "limit": request["limit"],
             "experimental_lexical": experimental_lexical,
@@ -232,6 +233,9 @@ def search_events(db_path, body: dict, *, experimental_lexical: bool = False) ->
                 "people_scope": "clip_associations" if item["kind"] == "recording" else "event_associations",
                 "people": item["people"],
             })
+            if request["place"]:
+                from place_context import clip_context
+                events[-1]["location"] = clip_context(db, item["chunk_id"])
         next_cursor = None
         if more:
             next_cursor = cursors.encode(key, {
@@ -307,6 +311,13 @@ def _live_members(db, chunk_ids: list[str] | None = None) -> dict[str, str]:
 
 
 def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
+    place_id = None
+    located = set()
+    if request["place"]:
+        from place_context import place_filter, tagged_clips
+        place_id = place_filter(db, request["place"])
+        located = {row[0] for row in db.execute("SELECT chunk_id FROM clip_place_context WHERE place_id=? AND resolution='known'", (place_id,))}
+        located.update(tagged_clips(db, place_id))
     matched = _matched_chunks(db, tokens) if tokens else {}
     if tokens and not matched:
         return []
@@ -329,6 +340,8 @@ def _candidates(db, tokens: list[str], request: dict) -> list[dict]:
     wanted = request["person"].casefold()
     grouped: dict[str, dict] = {}
     for chunk_id, event_id in membership.items():
+        if place_id and chunk_id not in located:
+            continue
         row = chunks.get(chunk_id)
         if row is None:
             continue

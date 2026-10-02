@@ -18,6 +18,15 @@ def allowlist() -> set[str]:
     return {part.strip() for part in raw.split(",") if part.strip()}
 
 
+def location_allowlist() -> set[str]:
+    raw = os.environ.get("LIFE_RECORDER_LOCATION_CLIENT_IDS", "")
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def has_scope(client_id, scope):
+    return client_id in (allowlist() if scope == "transcript" else location_allowlist() if scope == "location" else set())
+
+
 def service_token_client_id(claims: dict) -> str | None:
     name = claims.get("common_name")
     if not isinstance(name, str) or not name:
@@ -35,7 +44,7 @@ def classify_claims(claims: dict, allowed: set[str] | None = None) -> tuple[str,
     client_id = service_token_client_id(claims)
     if client_id is None:
         return "human", None
-    if client_id in (allowed if allowed is not None else allowlist()):
+    if client_id in (allowed if allowed is not None else allowlist() | location_allowlist()):
         return "machine", client_id
     return "forbidden", None
 

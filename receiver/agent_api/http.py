@@ -1,16 +1,17 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from urllib.parse import urlparse
 
 from access_auth import AccessAuthError, VerificationUnavailable
 
-from agent_api.auth import allowlist, classify_claims
+from agent_api.auth import allowlist, classify_claims, location_allowlist, has_scope
 from agent_api.errors import AgentError
 from agent_api.rate_limit import Limiter
 from agent_api.read import read_event, read_clip
 from agent_api.schemas import MAX_BODY_BYTES
-from agent_api.search import search_events
+from agent_api.search import search_events, open_read
 
 _EVENT_READ = "/read"
 
@@ -35,7 +36,7 @@ def access_outcome(handler):
             except AccessAuthError:
                 outcome = ("rejected", None)
             else:
-                kind, client_id = classify_claims(claims, allowlist())
+                kind, client_id = classify_claims(claims, allowlist() | location_allowlist())
                 outcome = (kind, client_id)
     handler._access_outcome = outcome
     return outcome
@@ -58,6 +59,8 @@ def _error(handler, status: int, code: str, message: str, retry_after: int | Non
 def _route(path: str):
     if path == "/v1/search":
         return "search", None
+    if path == "/v1/location/last-known":
+        return "location", None
     marker = "/v1/events/"
     clip_marker = "/v1/clips/"
     if path.startswith(clip_marker) and path.endswith(_EVENT_READ):
@@ -119,6 +122,10 @@ def intercept(handler, method: str) -> bool:
     if route is None:
         _error(handler, 403, "forbidden", "This credential cannot use that route.")
         return True
+    needed = "location" if route == "location" else "transcript"
+    if not has_scope(client_id, needed):
+        _error(handler, 403, "forbidden", "This credential cannot use that route.")
+        return True
     limiter = getattr(handler.server, "agent_limiter", None)
     if limiter is None:
         limiter = Limiter()
@@ -132,6 +139,8 @@ def intercept(handler, method: str) -> bool:
         return True
     try:
         body = _body(handler)
+        if route == "search" and "place" in body and not has_scope(client_id, "location"):
+            raise AgentError(403, "forbidden", "Place-filtered search requires transcript and location scopes.")
         inbox = handler._inbox()
         if route == "search":
             payload = search_events(inbox.db, body)
@@ -139,6 +148,18 @@ def intercept(handler, method: str) -> bool:
             raise AgentError(400, "invalid_input", "Event id is not valid.")
         elif route == "clip":
             payload = read_clip(inbox.db, event_id, body)
+        elif route == "location":
+            if body:
+                raise AgentError(400, "invalid_input", "Last-known location accepts an empty JSON object.")
+            from place_context import last_known
+            db = open_read(inbox.db)
+            try:
+                db.execute("BEGIN")
+                payload = last_known(db)
+            except sqlite3.Error as error:
+                raise AgentError(503, "unavailable", "Location context is unavailable.") from error
+            finally:
+                db.close()
         else:
             payload = read_event(inbox.db, event_id, body)
     except AgentError as error:

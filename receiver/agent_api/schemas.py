@@ -7,7 +7,7 @@ from datetime import datetime
 from agent_api.auth import reject_unknown_fields
 from agent_api.errors import AgentError
 
-SEARCH_FIELDS = {"query", "from", "to", "person", "include_unconfirmed", "limit", "cursor"}
+SEARCH_FIELDS = {"query", "from", "to", "person", "include_unconfirmed", "limit", "cursor", "place"}
 READ_FIELDS = {"mode", "include_unconfirmed", "max_chars", "cursor", "anchor", "context_before"}
 MAX_BODY_BYTES = 16 * 1024
 
@@ -52,6 +52,7 @@ def parse_search(body: dict) -> dict:
         "start": None,
         "end": None,
         "person": "",
+        "place": "",
         "include_unconfirmed": False,
         "limit": 5,
         "cursor": None,
@@ -66,6 +67,10 @@ def parse_search(body: dict) -> dict:
         raise AgentError(400, "invalid_input", "to must be later than from.")
     if "person" in body:
         parsed["person"] = _text(body["person"], "person").strip()
+    if "place" in body:
+        parsed["place"] = _text(body["place"], "place").strip()
+        if not parsed["place"] or len(parsed["place"]) > 128:
+            raise AgentError(400, "invalid_input", "place must be an exact bounded place id or name.")
     if "include_unconfirmed" in body:
         parsed["include_unconfirmed"] = _bool(body["include_unconfirmed"], "include_unconfirmed")
     if "limit" in body:

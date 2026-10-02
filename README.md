@@ -76,6 +76,14 @@ This section is the current contract. When it disagrees with `INSTALL-NOTES.md` 
 
 ### Transcription
 
+The viewer's Receiver health panel reports durable uploads separately from
+completed processing, pending/retrying/attention counts, original-audio storage
+and free disk space, processing-stage status, the source revision captured at
+process startup and the last committed search reconciliation. Pending work older
+than ten minutes is delayed; an idle recorder or a completed quiet clip is not a
+failure. `GET /v1/health` is human-authenticated. Phone status checks receive only
+their own device's processing totals, never receiver-wide metadata or transcripts.
+
 This installation transcribes with FluidAudio Parakeet TDT v3 through `fluidaudiocli`. Whisper.cpp and an isolated MLX Whisper command remain optional engines. Each clip stores its engine and model. Markdown session headings mark 15 minutes without captured audio.
 
 The receiver rejects empty decoded WAVs, including zero-byte cache leftovers from earlier attempts. A failed chunk retains its source audio, a sanitized stage/error code, and an automatic retry budget of five attempts. Permanent failures or an exhausted budget become `needs_attention` instead of looping forever. Those clips stay visible in the viewer even when quiet/pending clips are hidden. A human can select one and press **Retry processing** after diagnosis; retry is unavailable if its original audio is missing, and never overwrites a completed transcript or deletes the recording. This is Mac processing state, separate from the iPhone upload queue.

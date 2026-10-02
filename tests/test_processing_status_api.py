@@ -58,6 +58,10 @@ class ProcessingStatusAPITests(unittest.TestCase):
         self.assertEqual(record["status"], "pending")
         self.assertEqual(record["received_at"], 1000.0)
         self.assertEqual(record["retry_mode"], "automatic")
+        report = json.loads(body)["health"]
+        self.assertEqual(report["processing"]["received"], 1)
+        self.assertEqual(report["processing"]["complete"], 0)
+        self.assertEqual(set(report), {"version", "checked_at", "processing"})
         for private in (b"private audio", b"private transcript", b"path", b"sha256", self.device.encode()):
             self.assertNotIn(private, body)
         self.inbox.complete(self.chunk, "private transcript")
@@ -70,6 +74,7 @@ class ProcessingStatusAPITests(unittest.TestCase):
         _, wrong_device = self.request("/v1/chunks/status?ids=" + self.chunk, device=other)
         _, unknown = self.request("/v1/chunks/status?ids=" + other)
         self.assertEqual(json.loads(wrong_device)["chunks"][0]["status"], "unknown")
+        self.assertEqual(json.loads(wrong_device)["health"]["processing"]["received"], 0)
         self.assertEqual(json.loads(unknown)["chunks"][0]["status"], "unknown")
 
     def test_attention_is_visible_as_recoverable_not_complete(self):

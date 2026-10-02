@@ -198,6 +198,10 @@ APP = """<!doctype html>
     </div>
   </details>
   <p id="status" aria-live="polite">Loading</p>
+  <details id="receiver-health">
+    <summary>Receiver health</summary>
+    <p id="health-status" class="meta" aria-live="polite">Checking processing status…</p>
+  </details>
 </header>
 <main>
   <div id="library">
@@ -478,6 +482,33 @@ JS = r"""
   filters.open = !mobileLayout;
   function authHeaders() {
     return remote ? {} : { Authorization: "Bearer " + token };
+  }
+  async function loadHealth() {
+    const target = document.getElementById("health-status");
+    try {
+      const response = await fetch("/v1/health", { headers: authHeaders(), cache: "no-store" });
+      if (!response.ok) throw new Error("unavailable");
+      const report = await response.json();
+      const queue = report.processing || report.queue || {};
+      const storage = report.storage || {};
+      const parts = ["Pending: " + Number(queue.pending_count ?? queue.pending ?? 0),
+        "Needs attention: " + Number(queue.attention_count ?? queue.needs_attention ?? 0)];
+      if (queue.delayed || Number(queue.oldest_pending_age_seconds || 0) > 600) parts.push("Processing delayed — inspect pending recordings");
+      if (storage.low_space) parts.push("Low disk space — free storage on your Mac");
+      if (storage.original_audio_bytes != null) parts.push("Original audio: " + (storage.original_audio_bytes / 1048576).toFixed(1) + " MB" + (storage.audio_usage_complete ? "" : " (partial count)"));
+      if (storage.available_bytes != null) parts.push("Free space: " + (storage.available_bytes / 1073741824).toFixed(1) + " GB");
+      const stages = report.stages || {};
+      for (const name of ["asr", "diarization", "vad", "enhancement", "summaries", "topics"]) {
+        const stage = stages[name];
+        if (!stage) continue;
+        const counts = Object.entries(stage.counts || {}).map(([state, count]) => String(count) + " " + state).join(", ");
+        parts.push(name.toUpperCase() + ": " + (stage.enabled === false ? "off" : counts || "ready"));
+      }
+      if (queue.last_completed_at) parts.push("Last processed: " + new Date(queue.last_completed_at * 1000).toLocaleString());
+      if (report.runtime?.source_revision) parts.push("Source: " + String(report.runtime.source_revision).slice(0, 12));
+      if (report.agent_index?.last_reconciled_at) parts.push("Search index checked: " + new Date(report.agent_index.last_reconciled_at * 1000).toLocaleString());
+      target.textContent = parts.join(" · ");
+    } catch (_) { target.textContent = "Processing status unavailable. Check that your Mac receiver is reachable."; }
   }
   function reasonText(code) {
     return ({
@@ -2052,6 +2083,7 @@ JS = r"""
   tabReview.addEventListener("click", () => setView("review"));
   tabPeople.addEventListener("click", () => setView("people"));
   document.getElementById("refresh").addEventListener("click", () => {
+    loadHealth();
     if (view === "review") loadSpeakerReview(true);
     else loadDay();
   });
@@ -2069,6 +2101,7 @@ JS = r"""
     if (payload) render();
   });
   loadDays().then(loadDay).catch(() => { status.textContent = "Open through the local launcher."; });
+  loadHealth();
 })();
 """
 
@@ -2350,6 +2383,8 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "Unauthorized"})
         if path == "/v1/days":
             return self._json(200, {"days": self._inbox().viewer_days()})
+        if path == "/v1/health":
+            return self._json(200, self._inbox().health_snapshot())
         if path.startswith("/v1/audio/"):
             chunk_id = path.removeprefix("/v1/audio/")
             row = self._inbox().receipt(chunk_id)

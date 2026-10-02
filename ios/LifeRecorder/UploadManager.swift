@@ -254,8 +254,8 @@ final class UploadManager: NSObject, ObservableObject, URLSessionDataDelegate, U
                 self.statusInFlight = false
                 guard generation == self.statusGeneration else { return }
                 switch result {
-                case .success(let records):
-                    self.macProcessing = MacProcessingSummary(records: records, checkedAt: Date())
+                case .success(let response):
+                    self.macProcessing = MacProcessingSummary(records: response.chunks, checkedAt: Date(), health: response.health)
                 case .failure:
                     self.macProcessing = nil
                 }

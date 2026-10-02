@@ -4,6 +4,34 @@ import XCTest
 final class UploadDeliveryTests: XCTestCase {
     private let now = Date(timeIntervalSince1970: 1_700_000_000)
 
+    func testHealthTransportAcceptsOlderReceiverAndDoesNotInventFailure() throws {
+        let old = try JSONDecoder().decode(MacProcessingResponse.self, from: Data("{\"chunks\":[]}".utf8))
+        XCTAssertNil(old.health)
+        let idle = MacProcessingHealth(version: 1, checked_at: 1000, processing: .init(
+            received: 1, complete: 1, pending: 0, needs_attention: 0, retrying: 0,
+            oldest_pending_age_seconds: nil, last_received_at: 900, last_completed_at: 950,
+            delayed: false, state: "idle"))
+        let summary = MacProcessingSummary(records: [], checkedAt: now, health: idle)
+        XCTAssertFalse(summary.displayText.contains("delayed"))
+        XCTAssertFalse(summary.displayText.contains("need attention"))
+        XCTAssertFalse(summary.displayText.contains("retrying"))
+    }
+
+    func testHealthTransportShowsDeviceQueueBeyondRecentReceipts() throws {
+        let payload = Data("""
+        {"chunks":[],"health":{"version":1,"checked_at":1000,"processing":{
+          "received":12,"complete":4,"pending":6,"needs_attention":2,"retrying":3,
+          "oldest_pending_age_seconds":600,"last_received_at":900,"last_completed_at":850,
+          "delayed":true,"state":"needs_attention"}}}
+        """.utf8)
+        let response = try JSONDecoder().decode(MacProcessingResponse.self, from: payload)
+        let summary = MacProcessingSummary(records: response.chunks, checkedAt: now, health: response.health)
+        XCTAssertTrue(summary.displayText.contains("2 uploads from this phone need attention"))
+        XCTAssertTrue(summary.displayText.contains("Mac processing is delayed"))
+        XCTAssertTrue(summary.displayText.contains("10 minutes ago"))
+        XCTAssertTrue(summary.displayText.contains("3 uploads from this phone are retrying"))
+    }
+
     func testMacStatusUsesOnlyVerifiedProcessingRecords() throws {
         let payload = Data("""
         [{"id":"a","status":"complete","attempts":0},

@@ -242,6 +242,7 @@ struct MacProcessingRecord: Decodable, Equatable {
 struct MacProcessingSummary: Equatable {
     let records: [MacProcessingRecord]
     let checkedAt: Date
+    var health: MacProcessingHealth? = nil
 
     var displayText: String {
         let complete = records.filter { $0.status == "complete" }.count
@@ -253,10 +254,47 @@ struct MacProcessingSummary: Equatable {
         if pending > 0 { parts.append("\(pending) processing") }
         if attention > 0 { parts.append("\(attention) need attention on Mac") }
         if unknown > 0 { parts.append("\(unknown) not found on Mac") }
-        return "Mac processing (recent uploads): " + (parts.isEmpty ? "no recent clips" : parts.joined(separator: " · "))
+        let recent = "Mac processing (recent uploads): " + (parts.isEmpty ? "no recent clips" : parts.joined(separator: " · "))
+        guard let health else { return recent }
+        let queue = health.processing
+        var notices: [String] = []
+        if queue.needs_attention > 0 {
+            notices.append("\(queue.needs_attention) uploads from this phone need attention on Mac.")
+        }
+        if queue.delayed, let age = queue.oldest_pending_age_seconds {
+            notices.append("Mac processing is delayed; oldest pending upload from this phone was received \(UploadDeliveryCopy.compactAge(age)) ago.")
+        }
+        if queue.retrying > 0 {
+            notices.append("\(queue.retrying) uploads from this phone are retrying processing.")
+        }
+        return ([recent] + notices).joined(separator: " ")
     }
 
     var accessibilityLabel: String { displayText }
+}
+
+/// Receiver facts are scoped to this phone, independent of the ten receipt IDs.
+struct MacProcessingHealth: Decodable, Equatable {
+    struct Processing: Decodable, Equatable {
+        let received: Int
+        let complete: Int
+        let pending: Int
+        let needs_attention: Int
+        let retrying: Int
+        let oldest_pending_age_seconds: Double?
+        let last_received_at: Double?
+        let last_completed_at: Double?
+        let delayed: Bool
+        let state: String
+    }
+    let version: Int
+    let checked_at: Double
+    let processing: Processing
+}
+
+struct MacProcessingResponse: Decodable {
+    let chunks: [MacProcessingRecord]
+    let health: MacProcessingHealth?
 }
 
 /// Foreground-only status reads use the same pinned HTTPS identity as uploads.
@@ -270,7 +308,7 @@ final class MacProcessingStatusClient: NSObject, URLSessionDelegate {
     }()
 
     func fetch(ids: [String], settings: ReceiverSettings, deviceID: String,
-               completion: @escaping (Result<[MacProcessingRecord], Error>) -> Void) {
+               completion: @escaping (Result<MacProcessingResponse, Error>) -> Void) {
         let bounded = Array(ids.prefix(10))
         guard !bounded.isEmpty,
               var components = URLComponents(url: settings.baseURL.appendingPathComponent("v1/chunks/status"),
@@ -291,17 +329,15 @@ final class MacProcessingStatusClient: NSObject, URLSessionDelegate {
             if let error { completion(.failure(error)); return }
             guard let http = response as? HTTPURLResponse, http.statusCode == 200,
                   let data, data.count <= 16_384,
-                  let envelope = try? JSONDecoder().decode(Envelope.self, from: data),
+                  let envelope = try? JSONDecoder().decode(MacProcessingResponse.self, from: data),
                   envelope.chunks.count == bounded.count,
                   Set(envelope.chunks.map(\.id)) == Set(bounded) else {
                 completion(.failure(URLError(.badServerResponse)))
                 return
             }
-            completion(.success(envelope.chunks))
+            completion(.success(envelope))
         }.resume()
     }
-
-    private struct Envelope: Decodable { let chunks: [MacProcessingRecord] }
 
     func urlSession(_ session: URLSession, didReceive challenge: URLAuthenticationChallenge,
                     completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {

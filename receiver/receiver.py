@@ -35,6 +35,7 @@ import event_edits
 import diarization as diarization_mod
 import vad as vad_mod
 import voice_id
+import health as health_mod
 
 MAX_UPLOAD = 32 * 1024 * 1024
 SESSION_GAP_SECONDS = 15 * 60
@@ -156,6 +157,11 @@ class Inbox:
         self.days.mkdir(exist_ok=True, mode=0o700)
         self.db = self.root / "inbox.sqlite3"
         self.lock = threading.RLock()
+        self.health_started_at = time.time()
+        self.health_source_revision = health_mod.source_revision()
+        self.health_stages = {}
+        self.last_index_reconciled_at = None
+        self._index_reconciliation_times = {}
         self.viewer_error = None
         self.viewer_server = None
         self.viewer_thread = None
@@ -173,7 +179,7 @@ class Inbox:
                 attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
                 error TEXT, received REAL NOT NULL)""")
             meetings_mod.migrate_schema(db)
-            agent_api.reconcile(db, self._blocks_for(db))
+            self._reconcile_index(db)
         # Recover a crash after a transcript transaction but before Markdown refresh.
         self.export()
         self.cleanup_completed()
@@ -195,12 +201,23 @@ class Inbox:
             db.execute("PRAGMA synchronous=FULL")
             with db:
                 yield db
+            reconciled = self._index_reconciliation_times.pop(db, None)
+            if reconciled is not None:
+                self.last_index_reconciled_at = max(self.last_index_reconciled_at or 0, reconciled)
         finally:
+            self._index_reconciliation_times.pop(db, None)
             db.close()
 
     def receipt(self, chunk_id: str):
         with self.connect() as db:
             return db.execute("SELECT * FROM chunks WHERE id=?", (chunk_id,)).fetchone()
+
+    def _reconcile_index(self, db, touched=None):
+        agent_api.reconcile(db, self._blocks_for(db), touched)
+        self._index_reconciliation_times[db] = time.time()
+
+    def health_snapshot(self, device_id=None, now=None):
+        return health_mod.snapshot(self, device_id=device_id, now=now)
 
     def accept(self, tmp: Path, chunk_id: str, digest: str, device: str,
                started: str, duration: float, activity=None):
@@ -257,7 +274,7 @@ class Inbox:
                      json.dumps(summary), word_count, density, now, audio_bytes,
                      now + RETENTION_SECONDS, json.dumps(words or []), chunk_id),
                 )
-                agent_api.reconcile(db, self._blocks_for(db), {chunk_id})
+                self._reconcile_index(db, {chunk_id})
             self.export()
             # Keep completed audio for playback and speaker enrichment, within bounded limits.
             self.cleanup_completed()
@@ -554,7 +571,7 @@ class Inbox:
                 "SELECT id, started, duration, transcript FROM chunks"
             ).fetchall()
             saved = event_edits.save(db, body, rows)
-            agent_api.reconcile(db, self._blocks_for(db))
+            self._reconcile_index(db)
             return saved
 
     def viewer_days(self) -> list[str]:
@@ -901,7 +918,7 @@ class Inbox:
             voice_id.refresh_tracks(db, voice_id._tracks_for_turns(db, turn_ids))
             if enrolled.get("enrolled"):
                 voice_id.enqueue_unlabeled(db, "sample")
-            agent_api.reconcile(db, self._blocks_for(db), {turn["chunk_id"]})
+            self._reconcile_index(db, {turn["chunk_id"]})
             if changed:
                 agent_api.note_speaker_change(db, [turn["chunk_id"]])
         return True
@@ -947,7 +964,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.handle_processing_status()
         if self.path != "/health":
             return self.respond(404, {"error": "Not found"})
-        payload = {"ok": True, "chunks": self.inbox.status()}
+        payload = {"ok": True, "chunks": self.inbox.status(), "health": self.inbox.health_snapshot()}
         config = getattr(self.server, "asr_config", None)
         if config:
             payload["engine"] = config.engine
@@ -980,7 +997,7 @@ class Handler(BaseHTTPRequestHandler):
             or {"id": chunk_id, "status": "unknown"}
             for chunk_id in ids
         ]
-        return self.respond(200, {"chunks": records})
+        return self.respond(200, {"chunks": records, "health": self.inbox.health_snapshot(device_id=device_id)})
 
     def handle_meeting_event(self):
         length = int(self.headers.get("Content-Length", "0"))
@@ -1211,6 +1228,14 @@ def main():
     transcribe_ok = bool(args.ffmpeg) and (
         engine == "parakeet" or engine == "mlx" or (args.model and args.whisper)
     )
+    inbox.health_stages = {
+        "asr": transcribe_ok,
+        "diarization": bool(args.ffmpeg and args.diarization_cli.is_file()),
+        "vad": bool(args.ffmpeg and not args.no_vad and args.vad_cli.is_file()),
+        "enhancement": bool(args.ffmpeg and not args.no_vad and args.vad_cli.is_file()
+                            and not args.no_enhance and args.enhance_cli and args.enhance_cli.is_file()),
+        "summaries": os.environ.get("LIFE_RECORDER_REMOTE_SUMMARIES") == "1",
+    }
     if transcribe_ok:
         threading.Thread(target=worker,
                          args=(inbox, stop, args.model, args.whisper, args.ffmpeg,

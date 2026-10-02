@@ -45,6 +45,7 @@ class ViewerFeatureBrowserTests(unittest.TestCase):
                     self.fail(f"feature probe failed: {result.stdout[-800:]} {result.stderr[-1200:]}")
                 metrics = json.loads(result.stdout.strip().splitlines()[-1])
                 self.assertEqual(metrics["page_errors"], [])
+                self.assertTrue(metrics["health_rendered"])
                 self.assertTrue(metrics["no_preselected_name"])
                 self.assertTrue(metrics["confirmed_via_ui"])
                 self.assertTrue(metrics["event_edited_via_ui"])

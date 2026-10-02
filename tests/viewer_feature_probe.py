@@ -25,6 +25,10 @@ def main(url: str, output: Path):
         desktop = browser.new_page(viewport={"width": 1280, "height": 800})
         desktop.on("pageerror", lambda error: errors.append(str(error)))
         desktop.goto(url, wait_until="domcontentloaded")
+        desktop.wait_for_function("document.getElementById('health-status').textContent.includes('Pending:')")
+        desktop.locator("#receiver-health summary").click()
+        health_rendered = desktop.locator("#health-status").inner_text()
+        desktop.locator("#receiver-health summary").click()
         desktop.locator("#tab-review").click()
         desktop.locator(".review-card").first.wait_for(timeout=10000)
         desktop_metrics = bounds(desktop)
@@ -56,6 +60,7 @@ def main(url: str, output: Path):
             "confirmed_via_ui": True,
             "event_edited_via_ui": True,
             "page_errors": errors,
+            "health_rendered": "Pending:" in health_rendered and "Original audio:" in health_rendered,
         }
         print(json.dumps(result, sort_keys=True))
         mobile_context.close()

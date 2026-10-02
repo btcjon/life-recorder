@@ -11,12 +11,12 @@ runtime backup system is requested; pre-migration safety copies remain required.
 
 - [x] Health API, viewer and device-scoped phone status; idle/delayed/attention tests.
 - [x] All transcribed clips searchable; grouping-independent citations and clip reads.
-- [x] Frozen 120-case relevance benchmark; ranking remains experimental (held-out recall 0.8333 below 0.90).
+- [x] Frozen 120-case lexical/hybrid benchmark; ranking remains experimental (held-out hybrid recall 0.881 below 0.90).
 - [x] Profile provenance, sample withdrawal and conflict-safe identity undo.
 - [ ] Consented held-out speaker evaluation tooling; clusters gated on real evidence.
 - [x] Durable phone/manual viewer meeting markers, conservative closures, participant-change candidates and editable suggestions.
-- [x] Grok topic worker code with pinned model/route proof, validated output and isolated failures; live route unavailable and disabled.
-- [x] Place management, expiring observations, pinned location queue and separate agent scope; physical-phone rollout pending.
+- [x] Grok topic adapter with per-response provider model proof, validated output and isolated failures; current rollout status is recorded in INSTALL-NOTES.
+- [x] Place management, expiring observations, pinned location queue and separate agent scope; phone installed in place with location/motion switches off.
 - [ ] Opt-in background/motion trial with physical battery/coverage measurement protocol.
 - [ ] Enhanced playback comparison tooling; listening approval required for default change.
 - [ ] Seven-day quiet-upload evaluation; suppression inactive until the explicit gate passes.
@@ -28,20 +28,47 @@ measurements are pending evidence, never synthetic proof of those gates.
 
 ## Verified source checks
 
-Full Python suite: 322 tests passed, including rendered desktop/mobile viewer,
+Full Python suite: 355 tests passed, including rendered desktop/mobile viewer,
 scope denial, stale revisions, single-clip and midnight events, source citation
 continuity, and optional-context failures preserving durable audio receipts.
 The suite emitted synthetic JWT/SQLite warnings and a browser disconnect
 BrokenPipe trace; none failed a check. App simulator build and build-for-testing
-passed; XCTest execution remains unverified after simulator service failure.
-The signed device-build attempt failed because Xcode has no signed-in account
-and no cached provisioning profile. The existing working phone app was not
-replaced, and no permissions or recorder settings were changed.
+passed. After harness repairs, all 45 native XCTest tests passed, none skipped,
+including pinned HTTPS upload to an isolated synthetic loopback receiver; one
+durable receipt and its audio SHA were independently verified. Xcode exited zero
+after its owned stalled simulator-diagnostics helper was stopped. The result
+bundle independently reports Passed. A runtime main-thread warning remains in
+that bundle; no test failed. No physical phone was used for simulator fixtures.
+After the user signed into Xcode, the signed app was installed in place without
+resetting settings or pending recordings. A fresh physical 9.2-second clip was
+received, processed, indexed and playable. This did not prove cellular recovery.
 
 Migration rehearsal on a fresh private safety copy: two passes, second unchanged,
-SQLite integrity OK, event IDs/cursor preserved, 51 keyed/FTS transcripts and
-51 stable source citations verified. Copies are deployment safeguards, not an
+SQLite integrity OK, event IDs/cursor preserved, 52 keyed/FTS transcripts and
+52 stable source citations verified. Copies are deployment safeguards, not an
 ongoing backup service. New uploads remain in the live database.
+
+Persisted anonymous speaker proposal evidence includes similarity, margin,
+supporting turn/vector/track IDs, extraction version and source/membership
+fingerprints. Transcript/voice reconciliation refreshes it; stale reads hide it.
+Optional failures roll back only their savepoint. No enrolled profiles or real
+consented evaluation exist in the live database, so proposals remain gated off.
+
+The existing host-local Pi xAI credentials were used for synthetic Responses
+checks reporting the configured `grok-4.7`, no tools/web and `store:false`.
+Security review found a shared-credential refresh race; adapter-managed renewal
+was removed before rollout. Credentials are now read-only; expired OAuth fails
+closed with an instruction to renew through Pi. Each completed topic job records
+provider-envelope model evidence plus input/source/code/config fingerprints.
+
+The offline hybrid prototype uses the already-present Apple NaturalLanguage
+English sentence model (revision 1, 512 dimensions), with no download or cloud
+embedding. Tuning used 64 cases before evaluating 56 held-out cases. Recall and
+precision were 0.881, compared with lexical 0.8333 and baseline 0.6667; negative
+accuracy was 1.0, unsupported attribution zero, maximum response 2661 bytes and
+held-out p95 8.813 ms including fresh query embedding/IPC. This synthetic fixture
+does not prove natural-language production quality. Recall missed 0.90, so
+production ranking is unchanged.
 
 The local DeepFilterNet Apple Silicon executable was restored outside Git from
 its [official release](https://github.com/Rikorose/DeepFilterNet/releases/tag/v0.5.6).
@@ -52,20 +79,20 @@ and all recognition/enrollment input.
 
 ## Remaining acceptance gates
 
-- Xcode account sign-in/provisioning, in-place phone install, rendered controls
-  and fresh cellular/disconnection/recovery evidence.
+- Physical phone controls and fresh cellular/disconnection/recovery evidence.
 - Consented enrollment and held-out recordings covering noise, distance, brief
   and overlapping speech and unknown people; report correct/false/abstained
   outcomes per pseudonymous identity and condition. Clustering suggestions remain off.
-- Independently verified configured Grok model/route for topic jobs. No replacement
-  model/provider was selected. Manual/local timeline functionality works without it.
+- Live topic-job provenance after source rollout; OAuth renewal remains owned by
+  Pi. No replacement model/provider was selected. Manual/local timeline works
+  even when authentication or cloud analysis is unavailable.
 - Matched four-hour background battery runs: no audio loss/upload regression and
   at most three additional battery percentage points. The trial remains opt-in.
 - Twelve level-matched original/enhanced pairs and user listening approval before
   any playback-default change.
 - Seven representative shadow days with zero speech-containing holds, plus
   battery/storage/network evidence before a hold queue or production suppression.
-- Relevance targets and a separately selected/evaluated local hybrid model if
-  paraphrase coverage warrants it; no production ranking change is enabled.
+- A later measured production-ranking decision; the evaluated hybrid candidate
+  remains unreleased because it missed the recall target.
 
 Live rollout and origin readback are recorded in INSTALL-NOTES.md after observation.

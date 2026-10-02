@@ -123,15 +123,27 @@ not proof a meeting ended. Unknown identities do not create a split. Human saved
 boundaries take precedence; source clips and citations are preserved.
 
 Optional cloud topic jobs are separate from summaries. They require
-`LIFE_RECORDER_TOPIC_ANALYSIS=1`, an absolute `LIFE_RECORDER_TOPIC_CLI`, explicit
-`LIFE_RECORDER_TOPIC_MODEL`, and `LIFE_RECORDER_TOPIC_ROUTE_RECEIPT` pointing to a
-private, independently verified recent route receipt. The receipt pins executable
-SHA-256, provider `xai`, effective model, disabled tools/web, and `verified_at`.
-Missing or expired proof disables the job; there is no provider/model fallback.
-Only bounded clip IDs/transcript text go to the process on stdin. One job runs at
+`LIFE_RECORDER_TOPIC_ANALYSIS=1`, an absolute `LIFE_RECORDER_TOPIC_AUTH_FILE`
+pointing to the existing private Pi xAI credentials, explicit
+`LIFE_RECORDER_TOPIC_MODEL`, and adapter `xai-pi-oauth` (the default).
+The tool-free Responses adapter checks the provider-returned effective model on
+every response and stores source/input, adapter-code and configuration fingerprints.
+Missing authentication or mismatched provider metadata fails closed; there is no
+provider/model fallback. Legacy CLI/self-attested receipt routes are unsupported.
+Only bounded clip IDs/transcript text go to xAI; audio and location never do.
+Requests disable provider storage and register no tools. One job runs at
 a time after 120 seconds of settling, with bounded retries and validated output.
 Optional failures do not block recording, transcription, retrieval or timeline
 reads. Health reports an unavailable route rather than claiming it is ready.
+Credentials are read-only; Pi owns renewal. Expired OAuth credentials report
+`authentication_expired_renew_in_pi` and disable requests until renewed through
+the existing Pi account flow. This adapter never rotates tokens or rewrites
+other providers' credentials.
+
+Cross-recording speaker proposals persist their supporting turn/vector/track IDs,
+score, margin, extraction version and generation fingerprint after the consented
+evaluation gate. Reads hide stale generations; edits and sample withdrawal
+invalidate them. A proposal never merges, names or enrolls anyone automatically.
 
 Known places and explicit event/place tags are human-managed. Phone foreground
 location, background battery trial and motion are separate opt-ins, initially off.

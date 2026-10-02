@@ -10,6 +10,8 @@ import time
 DELAY_SECONDS = 10 * 60
 STORAGE_RESERVE_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
+                  'assets/favicon-32.png', 'assets/life-recorder-icon.png'}
 
 
 def source_identity(root=None, manifest_pin=None):
@@ -63,7 +65,8 @@ def source_identity(root=None, manifest_pin=None):
                 continue
             if path.suffix in ('.pyc', '.pyo'):
                 raise ValueError('release_bytecode_cache')
-            if path.suffix != '.py':
+            relative = path.relative_to(root).as_posix()
+            if path.suffix != '.py' and relative not in RELEASE_ASSETS:
                 if path == manifest:
                     continue
                 raise ValueError('release_extra_file')
@@ -73,7 +76,7 @@ def source_identity(root=None, manifest_pin=None):
             total += len(content)
             if total > 4 * 1024 * 1024:
                 raise ValueError('release_capacity_exceeded')
-            actual[path.relative_to(root).as_posix()] = hashlib.sha256(content).hexdigest()
+            actual[relative] = hashlib.sha256(content).hexdigest()
         if actual != expected:
             raise ValueError('release_source_changed')
         return {"state": "verified", "revision": revision, "method": "pinned_readonly_release",

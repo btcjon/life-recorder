@@ -14,6 +14,8 @@ import subprocess
 import tarfile
 import tempfile
 
+RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
+                  'assets/favicon-32.png', 'assets/life-recorder-icon.png'}
 
 def package(project, output_root):
     project, output_root = Path(project).resolve(), Path(output_root)
@@ -61,15 +63,16 @@ def package(project, output_root):
                 if item.isdir():
                     target.mkdir(mode=0o700, parents=True, exist_ok=True)
                     continue
-                if path.suffix != '.py' or item.size > 1024 * 1024:
-                    raise ValueError('Only bounded Python source belongs in this release')
+                relative = path.relative_to('receiver').as_posix()
+                if (path.suffix != '.py' and relative not in RELEASE_ASSETS) or item.size > 1024 * 1024:
+                    raise ValueError('Only bounded source and exact viewer assets belong in this release')
                 total += item.size
                 if total > 4 * 1024 * 1024:
                     raise ValueError('Receiver source limit')
                 content = bundle.extractfile(item).read()
                 target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 write(target, content)
-                files[path.relative_to('receiver').as_posix()] = hashlib.sha256(content).hexdigest()
+                files[relative] = hashlib.sha256(content).hexdigest()
         if not 2 <= len(files) <= 128 or not {'health.py', 'receiver.py'} <= files.keys():
             raise ValueError('Incomplete receiver source')
         metadata = {'version': 1, 'source_revision': revision, 'source_files': files}

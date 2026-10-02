@@ -72,6 +72,28 @@ class SourceReleaseTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             release.package(self.project, self.output)
 
+    def test_viewer_assets_are_packaged_hashed_and_exactly_allowlisted(self):
+        assets = self.project/'receiver/assets'
+        assets.mkdir()
+        for name in release.RELEASE_ASSETS:
+            (self.project/'receiver'/name).write_bytes(b'fixture PNG')
+        self.git('add', 'receiver')
+        self.git('commit', '-qm', 'viewer assets')
+        result, root = self.packaged()
+        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['state'], 'verified')
+        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['source_file_count'], 6)
+        asset = root/'assets/favicon-16.png'
+        self.assertEqual(asset.read_bytes(), b'fixture PNG')
+        asset.chmod(0o644)
+        asset.write_bytes(b'changed')
+        asset.chmod(0o444)
+        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['reason'], 'release_source_changed')
+        (assets/'unexpected.png').write_bytes(b'not allowlisted')
+        self.git('add', 'receiver')
+        self.git('commit', '-qm', 'unexpected asset')
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output)
+
     def test_manifest_pin_mutability_bytes_additions_deletions_and_symlinks(self):
         result, root = self.packaged()
         pin = result['manifest_sha256']

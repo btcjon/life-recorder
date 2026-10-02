@@ -24,6 +24,11 @@ from zoneinfo import ZoneInfo
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import health as health_mod
+# Validate the immutable deployment before importing application modules. Never
+# retrofit the current checkout's revision into an already running process.
+_STARTUP_SOURCE_IDENTITY = health_mod.source_identity()
+
 import asr as asr_mod
 import detector as detector_mod
 import meetings as meetings_mod
@@ -35,7 +40,6 @@ import event_edits
 import diarization as diarization_mod
 import vad as vad_mod
 import voice_id
-import health as health_mod
 import speaker_identity
 import timeline
 import topic_analysis
@@ -164,7 +168,8 @@ class Inbox:
         self.db = self.root / "inbox.sqlite3"
         self.lock = threading.RLock()
         self.health_started_at = time.time()
-        self.health_source_revision = health_mod.source_revision()
+        self.health_source_identity = dict(_STARTUP_SOURCE_IDENTITY)
+        self.health_source_revision = self.health_source_identity['revision']
         self.health_stages = {}
         self.last_index_reconciled_at = None
         self._index_reconciliation_times = {}

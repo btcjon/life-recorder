@@ -78,8 +78,13 @@ This section is the current contract. When it disagrees with `INSTALL-NOTES.md` 
 
 The viewer's Receiver health panel reports durable uploads separately from
 completed processing, pending/retrying/attention counts, original-audio storage
-and free disk space, processing-stage status, the source revision captured at
-process startup and the last committed search reconciliation. Pending work older
+and free disk space, processing-stage status, a verified immutable launch-source
+revision and the last committed search reconciliation. The launch job pins the
+release manifest SHA-256; the complete readonly receiver source tree is checked
+before application imports and cached for the process lifetime. Later checkout
+edits never become a running revision. Unmanaged or altered releases report
+source identity unavailable rather than guessing. No Git runs during startup
+attestation or health/device requests. Pending work older
 than ten minutes is delayed; an idle recorder or a completed quiet clip is not a
 failure. `GET /v1/health` is human-authenticated. Phone status checks receive only
 their own device's processing totals, never receiver-wide metadata or transcripts.

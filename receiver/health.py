@@ -1,7 +1,10 @@
 """Bounded operational facts. Never reads transcript, audio, or credentials."""
 from pathlib import Path
+import hashlib
+import json
+import os
 import shutil
-import subprocess
+import stat
 import time
 
 DELAY_SECONDS = 10 * 60
@@ -9,16 +12,80 @@ STORAGE_RESERVE_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 
 
-def source_revision():
-    """Capture once at process startup; an on-disk update is not deployment."""
+def source_identity(root=None, manifest_pin=None):
+    """Attest a readonly launch release before application imports, never HEAD.
+
+    Deployment builds the manifest from an exact commit; launchd separately
+    pins its SHA. The process caches this result. No Git or runtime data reads.
+    """
+    result = {"state": "unavailable", "revision": None, "method": "pinned_readonly_release",
+              "reason": "release_manifest_unconfigured"}
+    pin = os.environ.get('LIFE_RECORDER_SOURCE_MANIFEST_SHA256') if manifest_pin is None else manifest_pin
+    if not isinstance(pin, str) or len(pin) != 64 or any(c not in '0123456789abcdef' for c in pin):
+        return result
     try:
-        result = subprocess.run(
-            ["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parent,
-            capture_output=True, text=True, timeout=2, check=True)
-        revision = result.stdout.strip()
-        return revision if len(revision) == 40 and all(c in "0123456789abcdef" for c in revision) else None
-    except (OSError, subprocess.SubprocessError):
-        return None
+        # Keep the lexical launch path until every component is checked. An
+        # early resolve() could conceal a symlinked release directory.
+        root = Path(__file__).parent if root is None else Path(root)
+        root = root.absolute()
+        for component in (root, *root.parents):
+            if component.is_symlink():
+                raise ValueError('release_symlink')
+        root = root.resolve(strict=True)
+        def readonly(path, directory=False):
+            info = path.lstat()
+            return (info.st_uid == os.getuid() and not info.st_mode & 0o222
+                    and (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode)))
+        if not readonly(root, True) or not readonly(root.parent, True):
+            raise ValueError('release_not_readonly')
+        manifest = root / 'source-manifest.json'
+        if not readonly(manifest) or manifest.stat().st_size > 32768:
+            raise ValueError('release_manifest_invalid')
+        raw = manifest.read_bytes()
+        if hashlib.sha256(raw).hexdigest() != pin:
+            raise ValueError('release_manifest_mismatch')
+        metadata = json.loads(raw)
+        revision, expected = metadata.get('source_revision'), metadata.get('source_files')
+        if (metadata.get('version') != 1 or not isinstance(revision, str) or len(revision) != 40
+                or any(c not in '0123456789abcdef' for c in revision)
+                or not isinstance(expected, dict) or not 2 <= len(expected) <= 128
+                or not {'receiver.py', 'health.py'} <= expected.keys()):
+            raise ValueError('release_manifest_invalid')
+        actual, total = {}, 0
+        for count, path in enumerate(root.rglob('*'), 1):
+            if count > 256:
+                raise ValueError('release_capacity_exceeded')
+            if path.is_symlink():
+                raise ValueError('release_symlink')
+            if path.is_dir():
+                if path.name == '__pycache__' or not readonly(path, True):
+                    raise ValueError('release_not_readonly')
+                continue
+            if path.suffix in ('.pyc', '.pyo'):
+                raise ValueError('release_bytecode_cache')
+            if path.suffix != '.py':
+                if path == manifest:
+                    continue
+                raise ValueError('release_extra_file')
+            if not readonly(path) or path.stat().st_size > 1024 * 1024:
+                raise ValueError('release_source_invalid')
+            content = path.read_bytes()
+            total += len(content)
+            if total > 4 * 1024 * 1024:
+                raise ValueError('release_capacity_exceeded')
+            actual[path.relative_to(root).as_posix()] = hashlib.sha256(content).hexdigest()
+        if actual != expected:
+            raise ValueError('release_source_changed')
+        return {"state": "verified", "revision": revision, "method": "pinned_readonly_release",
+                "manifest_sha256": pin, "source_file_count": len(actual)}
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError) as error:
+        reason = str(error) if isinstance(error, ValueError) and str(error).startswith('release_') else 'release_manifest_unavailable'
+        return dict(result, reason=reason)
+
+
+def source_revision():
+    """Compatibility helper; an unmanaged checkout is not loaded-code proof."""
+    return source_identity()['revision']
 
 
 def processing(db, now, device_id=None):
@@ -93,7 +160,8 @@ def snapshot(inbox, device_id=None, now=None):
     except OSError:
         storage = {"available_bytes": None, "reserve_bytes": STORAGE_RESERVE_BYTES, "low_space": None, "state": "unavailable"}
     result.update(storage=storage, stages=stages,
-                  runtime={"started_at": inbox.health_started_at, "source_revision": inbox.health_source_revision},
+                  runtime={"started_at": inbox.health_started_at, "source_revision": inbox.health_source_revision,
+                           "source_identity": dict(inbox.health_source_identity)},
                   state="needs_attention" if queue["needs_attention"] or storage["state"] != "ok"
                   else "delayed" if queue["delayed"] else "ok")
     storage.update(original_audio_bytes=audio_bytes, pinned_count=pinned_count,

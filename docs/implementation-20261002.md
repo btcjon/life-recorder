@@ -20,7 +20,8 @@ runtime backup system is requested; pre-migration safety copies remain required.
 - [ ] Opt-in background/motion trial with physical battery/coverage measurement protocol.
 - [ ] Enhanced playback comparison tooling; listening approval required for default change.
 - [ ] Seven-day quiet-upload evaluation; suppression inactive until the explicit gate passes.
-- [ ] Cellular physical-device receipt/processing/search/playback and recovery check.
+- [x] Fresh user-confirmed Wi-Fi-off physical-device receipt/processing/search/playback check.
+- [ ] Temporary-disconnection queue recovery and physical-control checks.
 - [x] Full tests, rendered viewer, two-pass migration rehearsal and live receiver rollout; origin readback is recorded separately.
 
 Absent human listening, consented speaker recordings or duration-based phone
@@ -42,6 +43,11 @@ that bundle; no test failed. No physical phone was used for simulator fixtures.
 After the user signed into Xcode, the signed app was installed in place without
 resetting settings or pending recordings. A fresh physical 9.2-second clip was
 received, processed, indexed and playable. This did not prove cellular recovery.
+The later user-confirmed Wi-Fi-off test produced a 9.3-second clip: exactly one
+durable ingestion with verified original SHA, processing 1.611 seconds after
+receipt, remote search/citation read 200 and original range playback 206. All
+56 clips were complete. The receiver does not independently observe phone radio
+state; temporary-disconnection recovery still requires its separate test.
 
 Migration rehearsal on a fresh private safety copy: two passes, second unchanged,
 SQLite integrity OK, event IDs/cursor preserved, 52 keyed/FTS transcripts and

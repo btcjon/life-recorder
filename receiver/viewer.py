@@ -531,7 +531,8 @@ JS = r"""
           (reason && reason !== "disabled" ? " (" + reason + " — configure and verify the Grok route)" : ""));
       }
       if (queue.last_completed_at) parts.push("Last processed: " + new Date(queue.last_completed_at * 1000).toLocaleString());
-      if (report.runtime?.source_revision) parts.push("Source: " + String(report.runtime.source_revision).slice(0, 12));
+      if (report.runtime?.source_revision) parts.push("Source: " + String(report.runtime.source_revision).slice(0, 12) + " (verified launch release)");
+      else parts.push("Source revision unavailable — deploy a verified source release");
       if (report.agent_index?.last_reconciled_at) parts.push("Search index checked: " + new Date(report.agent_index.last_reconciled_at * 1000).toLocaleString());
       target.textContent = parts.join(" · ");
     } catch (_) { target.textContent = "Processing status unavailable. Check that your Mac receiver is reachable."; }

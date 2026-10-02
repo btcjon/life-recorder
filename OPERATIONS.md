@@ -17,6 +17,30 @@ need reload of this same job; preserve the loaded configuration first.
 
 ## Before a restart
 
+### Verified source release
+
+Commit reviewed receiver changes first. Build a private source-only release:
+
+```sh
+python3 scripts/package-receiver-release.py \
+  --output-root /absolute/private/runtime/source-releases
+```
+
+The output gives an exact `receiver_script`, committed source revision and
+`manifest_sha256`. After the safety checks below, point the existing job's script
+argument at that returned path and set `LIFE_RECORDER_SOURCE_MANIFEST_SHA256` to
+the returned digest. Preserve every other argument/environment value. Reload the
+same job when changing its plist. Never edit or overwrite a deployed readonly
+release; create a new committed release. No recording/database/token is packaged.
+This is a source deployment artifact, not a runtime-backup service.
+
+The receiver verifies its complete Python tree before application imports. A
+missing or mismatched pin, mutable source, added/deleted file, symlink or bytecode
+cache produces explicit unavailable provenance, not a guessed Git HEAD. Health
+caches the verified launch revision; it never follows later checkout changes.
+An already running unverified process cannot be retroactively attested. Local
+development checkout jobs therefore report source identity unavailable.
+
 Speaker maintenance diagnostics are read-only and aggregate-only:
 
 ```sh

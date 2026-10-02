@@ -6,6 +6,21 @@ Two statements later in this journal described the 2026-09-19 install and are no
 
 ## 2026-10-02 roadmap source and receiver rollout
 
+### Later phone update, 15:42 UTC
+
+After the user signed into Xcode, the physical-device build and strict code-signature
+verification passed. CoreDevice installed the current app in place under the same
+bundle ID, without uninstalling or resetting its data. Before installation the
+saved recorder switch was off and PendingAudio had zero entries. After installation,
+receiver URL, certificate pin, device identity, receipt IDs and recorder switch
+were unchanged; PendingAudio remained empty. Location, background trial and motion
+switches remain off. Private build and deployment evidence stays outside Git.
+
+Launching was denied because the iPhone was locked; no app process was running on
+readback. The user must unlock and open Life Recorder. Fresh recording/upload,
+rendered phone controls and cellular recovery remain unverified. This supersedes
+the earlier signing/install blocker below, not the outstanding physical trials.
+
 Implemented health, standalone transcript coverage/source citations, revisioned
 speaker correction/withdrawal/undo, manual phone/viewer meeting controls,
 participant-change candidates, topic worker safeguards, private place context,

@@ -6,12 +6,21 @@ final class NativeUploadTests: XCTestCase {
     @MainActor
     func testPinnedHTTPSUploadRemovesOnlyAcknowledgedClip() async throws {
         let environment = ProcessInfo.processInfo.environment
+        #if !targetEnvironment(simulator)
+        throw XCTSkip("The isolated HTTPS integration test runs only in Simulator")
+        #endif
         guard let address = environment["LIFE_TEST_URL"], let token = environment["LIFE_TEST_TOKEN"],
               let pin = environment["LIFE_TEST_PIN"] else {
             throw XCTSkip("Set LIFE_TEST_URL, LIFE_TEST_TOKEN and LIFE_TEST_PIN for the isolated HTTPS test receiver")
         }
         // Never use a user-configured receiver for this integration test.
-        guard address == "https://127.0.0.1:8766" else { throw XCTSkip("Expected isolated loopback test receiver") }
+        guard environment["LIFE_TEST_ISOLATED"] == "1",
+              let url = URLComponents(string: address), url.scheme == "https",
+              url.host == "127.0.0.1", let port = url.port, port > 1024, port <= 65535,
+              port != 8766, url.user == nil, url.password == nil,
+              url.query == nil, url.fragment == nil, url.path.isEmpty else {
+            throw XCTSkip("Expected explicitly isolated loopback HTTPS receiver on a safe temporary port")
+        }
         let priorURL = UserDefaults.standard.string(forKey: "receiverURL")
         let priorPin = UserDefaults.standard.string(forKey: "certificateSHA256")
         let priorToken = Credentials.token()
@@ -59,8 +68,16 @@ final class NativeUploadTests: XCTestCase {
         let ats = try XCTUnwrap(plist["NSAppTransportSecurity"] as? [String: Any])
         XCTAssertNil(ats["NSAllowsArbitraryLoads"])
         let domains = try XCTUnwrap(ats["NSExceptionDomains"] as? [String: Any])
-        XCTAssertEqual(Array(domains.keys), ["your-mac.example.ts.net"])
-        let exception = try XCTUnwrap(domains["your-mac.example.ts.net"] as? [String: Any])
+        // Installations replace the documented example with their exact host.
+        // Preserve the security invariant without requiring that example value.
+        XCTAssertEqual(domains.count, 1)
+        let host = try XCTUnwrap(domains.keys.first)
+        XCTAssertTrue(host.hasSuffix(".ts.net"))
+        XCTAssertGreaterThan(host.split(separator: ".").count, 2)
+        XCTAssertFalse(host.hasPrefix("."))
+        XCTAssertFalse(host.contains("*"))
+        XCTAssertFalse(host.contains("/"))
+        let exception = try XCTUnwrap(domains[host] as? [String: Any])
         XCTAssertEqual(exception["NSIncludesSubdomains"] as? Bool, false)
         XCTAssertEqual(exception["NSExceptionMinimumTLSVersion"] as? String, "TLSv1.2")
         XCTAssertEqual(exception["NSExceptionAllowsInsecureHTTPLoads"] as? Bool, true)

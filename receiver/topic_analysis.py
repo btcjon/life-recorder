@@ -1,21 +1,20 @@
-"""Opt-in bounded topic suggestions. Missing/unverified Grok routes stay unavailable.
+"""Opt-in bounded topic suggestions with provider-envelope route provenance.
 
-No live route is installed here. A caller must supply an independently observed
-model receipt; help text alone does not prove the model actually used. CLI output
-and transcript content never enter diagnostic error records.
+The inspected xAI adapter has no agent/file/web tools and checks provider-returned
+model metadata for each request. Missing credentials or mismatched routes fail
+closed; private provider text never enters diagnostic error records.
 """
 from dataclasses import dataclass
 import hashlib
 import json
-import math
 import os
 from pathlib import Path
-import subprocess
 import threading
 import time
 
 import meetings
 import timeline
+import grok_topics
 
 PROMPT_VERSION = "topic-boundaries-v1"
 MAX_CLIPS = 40
@@ -36,24 +35,16 @@ class TopicError(Exception):
 @dataclass(frozen=True)
 class Config:
     enabled: bool = False
-    executable: Path | None = None
+    auth_file: Path | None = None
     model: str | None = None
-    route_receipt: dict | None = None
+    adapter: str = "xai-pi-oauth"
 
     @classmethod
     def from_env(cls):
-        command = os.environ.get("LIFE_RECORDER_TOPIC_CLI")
-        receipt = None
-        receipt_path = os.environ.get('LIFE_RECORDER_TOPIC_ROUTE_RECEIPT')
-        if receipt_path:
-            try:
-                path = Path(receipt_path)
-                if path.is_absolute() and path.stat().st_size <= 4096:
-                    receipt = json.loads(path.read_text())
-            except (OSError, ValueError):
-                pass  # Unavailable proof disables the optional job.
+        auth = os.environ.get("LIFE_RECORDER_TOPIC_AUTH_FILE")
         return cls(os.environ.get("LIFE_RECORDER_TOPIC_ANALYSIS") == "1",
-                   Path(command) if command else None, os.environ.get("LIFE_RECORDER_TOPIC_MODEL"), receipt)
+                   Path(auth) if auth else None, os.environ.get("LIFE_RECORDER_TOPIC_MODEL"),
+                   os.environ.get("LIFE_RECORDER_TOPIC_ADAPTER", "xai-pi-oauth"))
 
 
 def ensure_schema(db):
@@ -62,42 +53,27 @@ def ensure_schema(db):
         fingerprint TEXT PRIMARY KEY, source_ids TEXT NOT NULL, source_fingerprint TEXT NOT NULL,
         model TEXT NOT NULL, prompt_version TEXT NOT NULL, state TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0, retry_at REAL NOT NULL DEFAULT 0,
-        error_code TEXT, updated_at REAL NOT NULL)""")
+        error_code TEXT, updated_at REAL NOT NULL, provenance TEXT)""")
+    if "provenance" not in {r[1] for r in db.execute("PRAGMA table_info(topic_jobs)")}:
+        db.execute("ALTER TABLE topic_jobs ADD COLUMN provenance TEXT")
 
 
-def verify_route(config, *, runner=subprocess.run):
-    """Check an actual external route receipt and supported restrictive CLI flags.
-
-    Receipt fields: executable_sha256, provider=xai, effective_model, tools=false,
-    web_search=false, verified_at=recent epoch time. The integration must independently obtain this receipt;
-    a desired model name or stale default is not an attestation.
-    """
+def verify_route(config):
+    """Preflight only; per-request provider metadata proves the effective model."""
     if not config.enabled:
         raise TopicError("disabled")
-    executable, model, receipt = config.executable, config.model, config.route_receipt
-    if executable is None or not executable.is_absolute() or not executable.is_file() or not os.access(executable, os.X_OK):
+    if config.adapter != "xai-pi-oauth" or config.auth_file is None:
         raise TopicError("route_unavailable")
-    if not model or not isinstance(model, str) or len(model) > 120 or not all(c.isalnum() or c in "-._/" for c in model):
-        raise TopicError("model_unconfigured")
-    digest = hashlib.sha256(executable.read_bytes()).hexdigest()
-    if not isinstance(receipt, dict) or receipt.get("executable_sha256") != digest or receipt.get("provider") != "xai" or receipt.get("effective_model") != model or receipt.get("tools") is not False or receipt.get("web_search") is not False:
-        raise TopicError("model_unverified")
-    verified_at = receipt.get("verified_at")
-    if isinstance(verified_at, bool) or not isinstance(verified_at, (float, int)) or not math.isfinite(verified_at) or not -5 <= time.time() - verified_at <= 300:
-        raise TopicError("model_unverified")
     try:
-        result = runner([str(executable), "--help"], capture_output=True, text=True, timeout=5)
-        help_text = result.stdout
-    except (OSError, subprocess.SubprocessError):
-        raise TopicError("route_unavailable") from None
-    if result.returncode or len(help_text.encode()) > 128 * 1024 or any(flag not in help_text for flag in ("--model", "--disable-tools", "--disable-web-search", "--prompt-file")):
-        raise TopicError("route_flags_unverified")
-    return {"provider": "xai", "effective_model": model, "executable_sha256": digest}
+        return grok_topics.preflight(config.auth_file, config.model)
+    except grok_topics.RouteError as error:
+        raise TopicError(error.code) from None
 
 
 def fingerprint(rows, model):
     source = timeline.source_fingerprint(rows)
-    return hashlib.sha256((source + ":" + PROMPT_VERSION + ":" + model).encode()).hexdigest()
+    return hashlib.sha256((source + ":" + PROMPT_VERSION + ":" + model + ":" +
+                           grok_topics.ADAPTER_VERSION + ":" + grok_topics.ADAPTER_SHA256).encode()).hexdigest()
 
 
 def build_prompt(rows):
@@ -146,20 +122,22 @@ def event_title(value):
     return " ".join(value.split())
 
 
-def run_model(config, rows, *, runner=subprocess.run):
-    provenance = verify_route(config, runner=runner)
+def run_model(config, rows, *, runner=None):
+    route = verify_route(config)
     prompt = build_prompt(rows)
-    command = [str(config.executable), "--model", config.model, "--prompt-file", "/dev/stdin",
-               "--max-turns", "1", "--disable-tools", "--disable-web-search", "--verbatim", "--output-format", "plain"]
     try:
-        result = runner(command, input=prompt, capture_output=True, text=True, timeout=120)
-    except subprocess.TimeoutExpired:
-        raise TopicError("timeout") from None
-    except (OSError, subprocess.SubprocessError):
-        raise TopicError("route_unavailable") from None
-    if result.returncode:
-        raise TopicError("model_failed")
-    return validate_result(result.stdout, [r["id"] for r in rows]), provenance
+        raw, provenance = (runner or grok_topics.run)(config.auth_file, config.model, prompt)
+    except grok_topics.RouteError as error:
+        raise TopicError(error.code) from None
+    # Validate even injected/custom runner envelopes. Legacy self-attested CLI
+    # receipts and model-generated route text are not a supported adapter.
+    if (not isinstance(provenance, dict) or any(provenance.get(k) != v for k, v in route.items())
+            or provenance.get("effective_model") != config.model
+            or not isinstance(provenance.get("response_id"), str) or not provenance["response_id"]
+            or provenance.get("input_sha256") != hashlib.sha256(prompt.encode()).hexdigest()):
+        raise TopicError("model_unverified")
+    provenance["source_fingerprint"] = timeline.source_fingerprint(rows)
+    return validate_result(raw, [r["id"] for r in rows]), provenance
 
 
 def windows(db):
@@ -200,15 +178,17 @@ def windows(db):
                 yield bounded
 
 
-def run_once(inbox, config=None, *, now=None, runner=subprocess.run):
+def run_once(inbox, config=None, *, now=None, runner=None):
     config = config or Config.from_env()
     now = time.time() if now is None else now
     try:
-        verify_route(config, runner=runner)
+        verify_route(config)
     except TopicError as error:
         return {"state": "disabled" if error.code == "disabled" else "unavailable", "error_code": error.code}
     chosen = None
-    with inbox.connect() as db:
+    with inbox.lock, inbox.connect() as db:
+        if db.execute("SELECT 1 FROM topic_jobs WHERE state='running' AND updated_at>? LIMIT 1", (now - 180,)).fetchone():
+            return {"state": "busy"}
         for rows in windows(db):
             if now - max(r["completed_at"] or r["received"] for r in rows) < SETTLE_SECONDS:
                 continue
@@ -236,7 +216,8 @@ def run_once(inbox, config=None, *, now=None, runner=subprocess.run):
                 raise TopicError("source_changed")
             suggestions = timeline.publish_suggestions(db, fingerprint=key, rows=rows, segments=segments,
                 model=provenance["effective_model"], prompt_version=PROMPT_VERSION, now=now)
-            db.execute("UPDATE topic_jobs SET state='complete',error_code=NULL,retry_at=0,updated_at=? WHERE fingerprint=?", (now, key))
+            db.execute("UPDATE topic_jobs SET state='complete',error_code=NULL,retry_at=0,updated_at=?,provenance=? WHERE fingerprint=?",
+                       (now, json.dumps(provenance, sort_keys=True), key))
         return {"state": "complete", "suggestion_count": len(suggestions)}
     except Exception as error:
         code = error.code if isinstance(error, TopicError) else "processing_failed"

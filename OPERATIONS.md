@@ -6,6 +6,8 @@ This is the current maintenance runbook for the Mac installation. [README.md](RE
 
 The launch job is `com.browseruse.life-recorder.receiver` in the current user's GUI domain. The private data directory is `~/Library/Application Support/LifeRecorder`; the active job must be inspected rather than inferred from this example. HTTPS upload listens on port 8766 and requires the private receiver bearer token. The viewer listens on `127.0.0.1:8767`; remote access, if configured, is Cloudflare Access to that viewer only. `agent_api_state.schema_version` is the agent-index schema; it is not SQLite's `PRAGMA user_version`.
 
+After the authorized October 2 rebuild, the active runtime is `~/Library/Application Support/LifeRecorder-Rebuilt-20261002`. The original `LifeRecorder` directory remains untouched; `LifeRecorder-Recovery-20261002` holds preservation copies and five recovered WAVs outside retention. The old incomplete runtime is **not a working rollback target**. On failure, stop the rebuilt job and preserve its database and every newly accepted upload; never replace them with the old incomplete database. Inspect the loaded job before using any path. Remote summaries and noise enhancement are disabled in this recovery configuration.
+
 ## Before a restart
 
 Speaker maintenance diagnostics are read-only and aggregate-only:

@@ -351,6 +351,7 @@ def save_result(inbox, chunk_id: str, result: dict) -> None:
             voice_extract_version=? WHERE id=?""",
                    (result["outcome"], voice_id.EXTRACTION_VERSION, chunk_id))
         voice_id.enqueue_chunk(db, chunk_id, "result")
+        inbox._refresh_speaker_proposals(db)
 
 
 def neighbor_rows(inbox, row) -> list:

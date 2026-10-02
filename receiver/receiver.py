@@ -231,7 +231,18 @@ class Inbox:
             db.execute('ROLLBACK TO optional_boundary_refresh')
         finally:
             db.execute('RELEASE optional_boundary_refresh')
+        self._refresh_speaker_proposals(db)
         self._index_reconciliation_times[db] = time.time()
+
+    def _refresh_speaker_proposals(self, db):
+        """Optional derived evidence cannot abort transcript/voice writes."""
+        db.execute('SAVEPOINT optional_speaker_proposals')
+        try:
+            speaker_identity.refresh_proposals(db)
+        except Exception:
+            db.execute('ROLLBACK TO optional_speaker_proposals')
+        finally:
+            db.execute('RELEASE optional_speaker_proposals')
 
     def health_snapshot(self, device_id=None, now=None):
         return health_mod.snapshot(self, device_id=device_id, now=now)

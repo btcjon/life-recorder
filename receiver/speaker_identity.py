@@ -7,6 +7,7 @@ perform background propagation. Private undo evidence stays in SQLite.
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 import time
 import uuid
@@ -17,6 +18,9 @@ import voice_id
 MAX_SELECTION = 200
 MAX_AFFECTED = 5000
 ALGORITHM = "eligible-vector-max-cosine-v1"
+PROPOSAL_TRACK_CAP = 30
+PROPOSAL_VECTOR_CAP = 64
+PROPOSAL_MEMBER_CAP = 200
 
 
 class Conflict(ValueError):
@@ -35,6 +39,11 @@ def migrate(db):
     db.execute("""CREATE TABLE IF NOT EXISTS speaker_sample_vectors (
         id TEXT PRIMARY KEY, sample_id TEXT NOT NULL, vector_id TEXT NOT NULL,
         UNIQUE(sample_id,vector_id))""")
+    db.execute("""CREATE TABLE IF NOT EXISTS speaker_proposal_generations (
+        id TEXT PRIMARY KEY, identity_revision INTEGER NOT NULL,
+        evidence_json TEXT NOT NULL, created_at REAL NOT NULL)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS speaker_proposal_state (
+        id INTEGER PRIMARY KEY CHECK(id=1), generation_id TEXT NOT NULL)""")
 
 
 def revision(db):
@@ -118,6 +127,7 @@ def _save(db, kind, scope, before):
     db.execute("INSERT INTO speaker_identity_changes VALUES(?,?,?,?,?,?,?,NULL)",
                (change_id, new_revision, kind, json.dumps(scope), json.dumps(before), json.dumps(after), time.time()))
     db.execute("UPDATE speaker_identity_state SET revision=? WHERE id=1", (new_revision,))
+    db.execute("DELETE FROM speaker_proposal_state")
     return {'change_id': change_id, 'revision': new_revision,
             'chunk_ids': sorted({t['chunk_id'] for t in before['speaker_turns']}), 'kind': kind}
 
@@ -290,7 +300,10 @@ def evaluation_gate(db):
     row = db.execute("SELECT report_json FROM speaker_cluster_evaluation WHERE id=1").fetchone()
     if not row:
         return {'enabled': False, 'reason': 'evaluation_unavailable'}
-    report = json.loads(row[0])
+    try:
+        report = json.loads(row[0])
+    except (ValueError, TypeError):
+        return {'enabled': False, 'reason': 'evaluation_not_passed'}
     if (not isinstance(report, dict) or not isinstance(report.get('categories'), dict)
             or any(type(report.get(k)) is not int for k in ('false_assignments', 'correct_assignments', 'unknown_cases'))
             or any(type(report['categories'].get(c)) is not int for c in ('noise', 'distance', 'overlap', 'short', 'unknown'))):
@@ -313,19 +326,89 @@ def record_evaluation(db, report):
     if not isinstance(report, dict) or len(json.dumps(report)) > 16000:
         raise ValueError("Invalid evaluation report")
     db.execute("INSERT INTO speaker_cluster_evaluation VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET report_json=excluded.report_json,updated_at=excluded.updated_at", (json.dumps(report), time.time()))
+    db.execute("DELETE FROM speaker_proposal_state")
 
 
-def proposals(db, limit=100):
+def _proposal_inputs(db):
+    """Bounded evidence snapshot; hashing reads evidence but never exposes it.
+
+    A selected track exceeding either cap fails closed instead of silently
+    excluding changed members. No pair calculation happens during GET.
+    """
+    tracks = [dict(r) for r in db.execute("SELECT * FROM voice_tracks ORDER BY created_at DESC,id LIMIT ?", (PROPOSAL_TRACK_CAP,))]
+    payload = {'identity_revision': revision(db), 'algorithm': ALGORITHM,
+               'extraction_version': voice_id.EXTRACTION_VERSION, 'tracks': tracks,
+               'thresholds': [voice_id.AUTO_MIN_SCORE, voice_id.AUTO_MIN_MARGIN],
+               'evaluation': dict(db.execute('SELECT * FROM speaker_cluster_evaluation WHERE id=1').fetchone())}
+    vectors, members, sources, samples = {}, {}, {}, {}
+    source_chars = 0
+    for track in tracks:
+        rows = [dict(r) for r in db.execute("""SELECT DISTINCT v.* FROM voice_vectors v
+            JOIN voice_assignments a ON a.vector_id=v.id
+            WHERE a.track_id=? AND a.active=1 AND a.state='assigned'
+            ORDER BY v.created_at,v.id LIMIT ?""", (track['id'], PROPOSAL_VECTOR_CAP + 1))]
+        turn_rows = [dict(r) for r in db.execute("""SELECT DISTINCT t.* FROM speaker_turns t
+            JOIN voice_vectors v ON v.turn_id=t.id JOIN voice_assignments a ON a.vector_id=v.id
+            WHERE a.track_id=? AND a.active=1 AND a.state='assigned'
+            ORDER BY t.id LIMIT ?""", (track['id'], PROPOSAL_MEMBER_CAP + 1))]
+        if len(rows) > PROPOSAL_VECTOR_CAP or len(turn_rows) > PROPOSAL_MEMBER_CAP:
+            return None
+        members[track['id']] = turn_rows
+        vectors[track['id']] = rows
+        for turn in turn_rows:
+            # A transcript/audio-source/capture revision change invalidates the
+            # evidence; source text itself is not persisted in proposal records.
+            if turn['chunk_id'] not in sources:
+                size = db.execute('SELECT length(COALESCE(transcript,\'\')) FROM chunks WHERE id=?', (turn['chunk_id'],)).fetchone()
+                source_chars += size[0] if size else 0
+                if (size and size[0] > 100000) or source_chars > 2000000:
+                    return None
+                source = db.execute('SELECT id,sha256,started,transcript FROM chunks WHERE id=?', (turn['chunk_id'],)).fetchone()
+                sources[turn['chunk_id']] = dict(source) if source else None
+                if source:
+                    sources[turn['chunk_id']]['transcript'] = hashlib.sha256((source['transcript'] or '').encode()).hexdigest()
+            owned = [dict(r) for r in db.execute('SELECT * FROM voice_samples WHERE turn_id=? ORDER BY id LIMIT 201', (turn['id'],))]
+            if len(owned) > 200:
+                return None
+            samples[turn['id']] = owned
+        track['members'] = turn_rows
+    payload.update(vectors=vectors, members=members, sources=sources, samples=samples)
+    fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    turn_sources = {t['id']: t['chunk_id'] for rows in members.values() for t in rows}
+    eligible = {track['id']: [v for v in vectors[track['id']] if v['timed'] and not v['legacy'] and not v['overlap']
+                              and v['duration'] >= voice_id.MIN_CLEAN_SECONDS and v['extraction_version'] == voice_id.EXTRACTION_VERSION
+                              and turn_sources.get(v['turn_id']) == v['chunk_id'] and sources.get(v['chunk_id']) is not None
+                              and _proposal_vector(v) is not None]
+                for track in tracks if track['status'] == 'open'}
+    return fingerprint, tracks, eligible
+
+
+def _proposal_vector(record):
+    try:
+        return voice_id.normalize_vector(json.loads(record['embedding_json']))
+    except (ValueError, TypeError):
+        return None
+
+
+def refresh_proposals(db):
+    """Explicit reconciliation hook; caller owns transaction/commit.
+
+    Persist similarity support only after the existing consented evaluation
+    gate. Does not label, merge, enroll, or lower any threshold.
+    """
     gate = evaluation_gate(db)
     if not gate['enabled']:
-        return {'revision': revision(db), 'gate': gate, 'proposals': []}
-    if type(limit) is not int or not 1 <= limit <= 200:
-        raise ValueError("Invalid limit")
-    # Bound pair work independently of the list endpoint; these are optional
-    # suggestions, never a complete inventory or a background mutation.
-    tracks = clusters(db, min(limit, 30))['clusters']
-    vectors = {t['id']: _eligible(db, t['id']) for t in tracks if t['status'] == 'open'}
-    normalized = {track_id: [voice_id.normalize_vector(json.loads(v['embedding_json'])) for v in records[:16]]
+        db.execute('DELETE FROM speaker_proposal_state')
+        return {'generated': False, 'reason': gate['reason']}
+    inputs = _proposal_inputs(db)
+    if inputs is None:
+        db.execute('DELETE FROM speaker_proposal_state')
+        return {'generated': False, 'reason': 'proposal_capacity_exceeded'}
+    fingerprint, tracks, vectors = inputs
+    existing = db.execute('SELECT generation_id FROM speaker_proposal_state WHERE id=1').fetchone()
+    if existing and existing[0] == fingerprint:
+        return {'generated': False, 'reason': 'unchanged', 'generation_id': fingerprint}
+    normalized = {track_id: [_proposal_vector(v) for v in records[:16]]
                   for track_id, records in vectors.items()}
     result, seen = [], set()
     for track in tracks:
@@ -340,19 +423,67 @@ def proposals(db, limit=100):
             identities = {m['person_id'] for m in track['members'] + other['members'] if m['person_id'] and m['label_source'] == 'confirmed'}
             if len(identities) > 1:
                 continue
-            score = max(sum(l[i] * r[i] for i in range(voice_id.EMBEDDING_DIM))
-                        for l in normalized[track['id']] for r in normalized[other['id']])
-            ranked.append((score, other['id']))
+            support = max((sum(l[i] * r[i] for i in range(voice_id.EMBEDDING_DIM)), li, ri)
+                          for li, l in enumerate(normalized[track['id']]) for ri, r in enumerate(normalized[other['id']]))
+            ranked.append((support[0], other['id'], support[1], support[2]))
         ranked.sort(reverse=True)
         if not ranked:
             continue
-        score, other_id = ranked[0]
+        score, other_id, li, ri = ranked[0]
         margin = score - ranked[1][0] if len(ranked) > 1 else score
         pair = tuple(sorted((track['id'], other_id)))
         if score >= voice_id.AUTO_MIN_SCORE and margin >= voice_id.AUTO_MIN_MARGIN and pair not in seen:
             seen.add(pair)
-            result.append({'track_ids': list(pair), 'score': round(score, 3), 'margin': round(margin, 3), 'state': 'proposed', 'enrolls': False})
-    return {'revision': revision(db), 'gate': gate, 'proposals': result}
+            left_support, right_support = left[li], vectors[other_id][ri]
+            result.append({'id': hashlib.sha256((ALGORITHM + ':' + ':'.join(pair)).encode()).hexdigest()[:32],
+                           'track_ids': list(pair), 'score': score, 'margin': margin,
+                           'supporting_turn_ids': [left_support['turn_id'], right_support['turn_id']],
+                           'supporting_vector_ids': [left_support['id'], right_support['id']],
+                           'supporting_track_ids': [track['id'], other_id],
+                           'runner_up_track_id': ranked[1][1] if len(ranked) > 1 else None,
+                           'runner_up_score': ranked[1][0] if len(ranked) > 1 else None,
+                           'extraction_version': voice_id.EXTRACTION_VERSION,
+                           'generation_id': fingerprint, 'membership_revision': fingerprint,
+                           'state': 'proposed', 'enrolls': False})
+    db.execute('INSERT OR IGNORE INTO speaker_proposal_generations VALUES(?,?,?,?)',
+               (fingerprint, revision(db), json.dumps(result), time.time()))
+    db.execute('INSERT INTO speaker_proposal_state VALUES(1,?) ON CONFLICT(id) DO UPDATE SET generation_id=excluded.generation_id', (fingerprint,))
+    # Retain bounded generation history, including the current generation.
+    db.execute('DELETE FROM speaker_proposal_generations WHERE id NOT IN (SELECT id FROM speaker_proposal_generations ORDER BY created_at DESC,id LIMIT 10) AND id<>?', (fingerprint,))
+    return {'generated': True, 'generation_id': fingerprint, 'proposal_count': len(result)}
+
+
+def proposals(db, limit=100):
+    # Hold one read snapshot across gate, source fingerprint and persisted
+    # evidence checks, including when the caller uses an autocommit connection.
+    db.execute('SAVEPOINT speaker_proposal_read')
+    try:
+        return _read_proposals(db, limit)
+    finally:
+        db.execute('RELEASE speaker_proposal_read')
+
+
+def _read_proposals(db, limit):
+    if type(limit) is not int or not 1 <= limit <= 200:
+        raise ValueError('Invalid limit')
+    gate = evaluation_gate(db)
+    response = {'revision': revision(db), 'gate': gate, 'proposals': []}
+    if not gate['enabled']:
+        return response
+    state = db.execute('SELECT generation_id FROM speaker_proposal_state WHERE id=1').fetchone()
+    if not state:
+        response['proposal_status'] = 'generation_unavailable'
+        return response
+    inputs = _proposal_inputs(db)
+    if inputs is None or inputs[0] != state[0]:
+        response['proposal_status'] = 'stale_evidence'
+        return response
+    row = db.execute('SELECT evidence_json FROM speaker_proposal_generations WHERE id=?', (state[0],)).fetchone()
+    if not row:
+        response['proposal_status'] = 'generation_unavailable'
+        return response
+    response.update(proposal_status='current', generation_id=state[0], proposals=json.loads(row[0])[:limit])
+    return response
 
 
 def merge(db, track_ids, expected_revision=None):

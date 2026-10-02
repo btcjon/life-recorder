@@ -1122,6 +1122,7 @@ def step_voice_maintenance(inbox) -> bool:
                 saved += recover_chunk(db, chunk_id)
                 auto_tag_chunks(db, [chunk_id])
                 db.execute("DELETE FROM voice_jobs WHERE chunk_id=?", (chunk_id,))
+                inbox._refresh_speaker_proposals(db)
         if saved:
             with inbox.connect() as db:
                 enqueue_unlabeled(db, "recover")

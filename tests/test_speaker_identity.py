@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 import uuid
+from unittest.mock import patch
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'receiver'))
@@ -134,6 +135,20 @@ class SpeakerIdentityTests(unittest.TestCase):
         identity.record_evaluation(self.db, {'status': 'passed'})
         self.assertFalse(identity.evaluation_gate(self.db)['enabled'])
 
+    def test_reconciliation_refreshes_proposals_without_blocking_index(self):
+        with patch.object(identity, 'refresh_proposals') as refresh:
+            with self.inbox.connect() as db:
+                self.inbox._reconcile_index(db)
+            refresh.assert_called_once()
+        def fail(db):
+            db.execute('INSERT INTO speaker_proposal_state VALUES(1,?)', ('partial',))
+            raise RuntimeError('optional generator unavailable')
+        with patch.object(identity, 'refresh_proposals', side_effect=fail):
+            with self.inbox.connect() as db:
+                self.inbox._reconcile_index(db)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM speaker_proposal_state').fetchone()[0], 0)
+        self.assertIsNotNone(self.inbox.last_index_reconciled_at)
+
     def test_consent_and_session_holdout_required_for_evaluation(self):
         one, two, case = self.turn(), self.turn(1), self.turn()
         manifest = {'consent': True, 'references': [{'turn_id': one, 'identity': 'a', 'session': 'train'}, {'turn_id': two, 'identity': 'b', 'session': 'train'}], 'cases': [{'turn_id': case, 'identity': 'a', 'session': 'train', 'category': 'known'}]}
@@ -146,6 +161,142 @@ class SpeakerIdentityTests(unittest.TestCase):
         self.assertNotIn(one, json.dumps(report))
         manifest['consent'] = False
         self.assertEqual(evaluation.evaluate(self.db, manifest)['status'], 'unavailable')
+
+    def allow_synthetic_proposals(self):
+        # Schema-complete test evidence only; never a real consent/evaluation.
+        import voice_id
+        identity.record_evaluation(self.db, {
+            'algorithm': identity.ALGORITHM, 'extraction_version': voice_id.EXTRACTION_VERSION,
+            'consent': True, 'separated_clips': True, 'separated_sessions': True,
+            'status': 'passed', 'false_assignments': 0, 'correct_assignments': 10,
+            'unknown_cases': 10, 'categories': {c: 2 for c in ('noise', 'distance', 'overlap', 'short', 'unknown')},
+            'thresholds': {'score': voice_id.AUTO_MIN_SCORE, 'margin': voice_id.AUTO_MIN_MARGIN},
+            'manifest_sha256': 'a' * 64, 'enrollment_references_ready': True})
+
+    def generated_pair(self):
+        one, two = self.turn(), self.turn()
+        self.allow_synthetic_proposals()
+        self.assertTrue(identity.refresh_proposals(self.db)['generated'])
+        proposals = identity.proposals(self.db)['proposals']
+        self.assertEqual(len(proposals), 1)
+        return one, two, proposals[0]
+
+    def test_persisted_generation_support_and_read_only_get(self):
+        one, two, proposal = self.generated_pair()
+        self.assertEqual(set(proposal['supporting_turn_ids']), {one, two})
+        self.assertEqual(proposal['score'], 1.0)
+        self.assertEqual(proposal['margin'], 1.0)
+        self.assertEqual(proposal['extraction_version'], 3)
+        self.assertFalse(proposal['enrolls'])
+        self.assertNotIn('embedding_json', json.dumps(proposal))
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM speaker_proposal_generations').fetchone()[0], 1)
+        changes = self.db.total_changes
+        self.assertEqual(identity.proposals(self.db, 1)['proposals'][0]['id'], proposal['id'])
+        self.assertEqual(self.db.total_changes, changes)
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM voice_samples').fetchone()[0], 0)
+
+    def test_noop_refresh_preserves_generation_identity_without_writes(self):
+        _, _, proposal = self.generated_pair()
+        changes = self.db.total_changes
+        refreshed = identity.refresh_proposals(self.db)
+        self.assertEqual(refreshed['reason'], 'unchanged')
+        self.assertEqual(refreshed['generation_id'], proposal['generation_id'])
+        self.assertEqual(self.db.total_changes, changes)
+
+    def test_gate_requires_explicit_generation_and_fails_closed(self):
+        self.turn()
+        self.turn()
+        self.assertFalse(identity.refresh_proposals(self.db)['generated'])
+        self.allow_synthetic_proposals()
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'generation_unavailable')
+        identity.refresh_proposals(self.db)
+        self.db.execute("UPDATE speaker_cluster_evaluation SET report_json='broken'")
+        self.assertFalse(identity.evaluation_gate(self.db)['enabled'])
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+
+    def test_source_embedding_and_membership_changes_hide_stale_evidence(self):
+        one, _, proposal = self.generated_pair()
+        chunk = self.db.execute('SELECT chunk_id FROM speaker_turns WHERE id=?', (one,)).fetchone()[0]
+        self.db.execute("UPDATE chunks SET transcript='Changed source' WHERE id=?", (chunk,))
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        changed = identity.proposals(self.db)['proposals'][0]
+        self.assertEqual(changed['id'], proposal['id'])
+        self.assertNotEqual(changed['membership_revision'], proposal['membership_revision'])
+        vector = [0.] * 256
+        vector[1] = 1.
+        self.db.execute('UPDATE voice_vectors SET embedding_json=? WHERE turn_id=?', (json.dumps(vector), one))
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+        self.db.execute("UPDATE voice_assignments SET active=0 WHERE vector_id IN (SELECT id FROM voice_vectors WHERE turn_id=?)", (one,))
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+
+    def test_human_conflict_invalidates_and_cannot_regenerate_pair(self):
+        one, two, _ = self.generated_pair()
+        self.change([one], self.a)
+        self.change([two], self.b)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+        identity.refresh_proposals(self.db)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+
+    def test_sample_withdrawal_and_undo_invalidate_generation(self):
+        one, two, _ = self.generated_pair()
+        self.change([one], self.a, True)
+        self.change([two], self.a, True)
+        identity.refresh_proposals(self.db)
+        sample = self.db.execute('SELECT id FROM voice_samples WHERE turn_id=?', (one,)).fetchone()[0]
+        removed = identity.remove_sample(self.db, sample, identity.revision(self.db))
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+        identity.refresh_proposals(self.db)
+        identity.undo(self.db, removed['change_id'], removed['revision'])
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+
+    def test_only_human_merge_changes_assignments_and_never_enrolls(self):
+        _, _, proposal = self.generated_pair()
+        memberships = list(self.db.execute('SELECT id,track_id,active FROM voice_assignments ORDER BY id'))
+        identity.refresh_proposals(self.db)
+        identity.proposals(self.db)
+        self.assertEqual(list(self.db.execute('SELECT id,track_id,active FROM voice_assignments ORDER BY id')), memberships)
+        identity.merge(self.db, proposal['track_ids'], identity.revision(self.db))
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+        identity.refresh_proposals(self.db)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+        self.assertEqual(self.db.execute('SELECT COUNT(*) FROM voice_samples').fetchone()[0], 0)
+
+    def test_capacity_is_independent_of_response_pagination(self):
+        self.generated_pair()
+        with patch.object(identity, 'PROPOSAL_MEMBER_CAP', 0):
+            self.assertEqual(identity.proposals(self.db, 1)['proposal_status'], 'stale_evidence')
+            self.assertEqual(identity.refresh_proposals(self.db)['reason'], 'proposal_capacity_exceeded')
+
+    def test_capture_and_extraction_revisions_invalidate_evidence(self):
+        one, _, _ = self.generated_pair()
+        chunk = self.db.execute('SELECT chunk_id FROM speaker_turns WHERE id=?', (one,)).fetchone()[0]
+        self.db.execute("UPDATE chunks SET started='2026-10-02T12:00:00Z' WHERE id=?", (chunk,))
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        self.db.execute('UPDATE voice_vectors SET extraction_version=4 WHERE turn_id=?', (one,))
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
+
+    def test_competitor_change_revises_margin_before_proposal_return(self):
+        self.generated_pair()
+        # Simulate an out-of-band writer; normal diarization now refreshes
+        # proposals in the same transaction as the new vector assignments.
+        with patch.object(self.inbox, '_refresh_speaker_proposals'):
+            self.turn(axis=1)
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        proposal = identity.proposals(self.db, 1)['proposals'][0]
+        self.assertEqual(proposal['margin'], 1.0)
+        self.assertIsNotNone(proposal['runner_up_track_id'])
+        with patch.object(self.inbox, '_refresh_speaker_proposals'):
+            self.turn(axis=0)
+        self.assertEqual(identity.proposals(self.db)['proposal_status'], 'stale_evidence')
+        identity.refresh_proposals(self.db)
+        self.assertEqual(identity.proposals(self.db)['proposals'], [])
 
 
 if __name__ == '__main__':

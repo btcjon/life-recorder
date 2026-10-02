@@ -174,7 +174,7 @@ class EditBehaviorTests(unittest.TestCase):
         )
         self.assertEqual([block["source"] for block in blocks], ["suggestion", "manual", "suggestion"])
 
-    def test_same_day_order_and_overlap_are_rejected(self):
+    def test_order_and_overlap_are_rejected_even_across_days(self):
         morning = self._ids("2026-09-22T13:00:00Z", "2026-09-22T13:01:00Z")
         with self.inbox.connect() as db:
             add_chunk(db, "nextday", "2026-09-23T04:30:00Z")
@@ -191,7 +191,7 @@ class EditBehaviorTests(unittest.TestCase):
                 "end_chunk_id": "nextday",
                 "expected_revision": 0,
             })
-        self.assertEqual(crossed.exception.payload["error"], "Events must stay on one day")
+        self.assertEqual(crossed.exception.payload["error"], "Boundaries overlap another edit")
         with self.assertRaises(event_edits.EditError) as backwards:
             self.inbox.save_event_edit({
                 "id": saved["id"],

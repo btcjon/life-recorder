@@ -103,11 +103,8 @@ def _locate(chunks: list[dict], start_id: str, end_id: str):
     if start_i > end_i:
         return None, EditError(400, "Boundaries are out of order")
     span = ordered[start_i:end_i + 1]
-    days = {viewer._local_date(viewer._chunk_start(chunk)) for chunk in span}
-    if len(days) != 1:
-        return None, EditError(400, "Events must stay on one day")
-    if len(span) < 2:
-        return None, EditError(400, "An event needs two recordings")
+    # Explicit human boundaries may describe one clip or cross midnight.
+    # Automatic grouping remains conservative and day-scoped.
     return span, None
 
 

@@ -21,6 +21,14 @@ readback. The user must unlock and open Life Recorder. Fresh recording/upload,
 rendered phone controls and cellular recovery remain unverified. This supersedes
 the earlier signing/install blocker below, not the outstanding physical trials.
 
+At 15:45 UTC, after the user opened the updated app and made a test recording,
+the Mac received a new 9.2-second clip and completed processing in about two
+seconds with a nonempty transcript. All 55 clips were complete, the phone queue
+was empty, and the new transcript matched its indexed source exactly. Its FTS
+entry was present; retained original playback returned HTTP 206. This verifies
+fresh physical-phone delivery/processing, not cellular-disconnect recovery or
+the remaining battery, listening, location and speaker-evaluation gates.
+
 Implemented health, standalone transcript coverage/source citations, revisioned
 speaker correction/withdrawal/undo, manual phone/viewer meeting controls,
 participant-change candidates, topic worker safeguards, private place context,

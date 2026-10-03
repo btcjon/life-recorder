@@ -18,10 +18,10 @@ runtime backup system is requested; pre-migration safety copies remain required.
 - [x] Grok topic adapter with per-response provider model proof, validated output and isolated failures; current rollout status is recorded in INSTALL-NOTES.
 - [x] Place management, expiring observations, pinned location queue and separate agent scope; phone installed in place with location/motion switches off.
 - [ ] Opt-in background/motion trial with physical battery/coverage measurement protocol.
-- [ ] Enhanced playback comparison tooling; listening approval required for default change.
+- [x] Enhanced playback comparison tooling and twelve private objectively checked pairs; listening approval remains required for default change.
 - [ ] Seven-day quiet-upload evaluation; suppression inactive until the explicit gate passes.
 - [x] Fresh user-confirmed Wi-Fi-off physical-device receipt/processing/search/playback check.
-- [ ] Temporary-disconnection queue recovery and physical-control checks.
+- [ ] Later: temporary-disconnection queue recovery and physical-control checks, explicitly deferred October 3; not an active completion gate.
 - [x] Full tests, rendered viewer, two-pass migration rehearsal and live receiver rollout; origin readback is recorded separately.
 
 Absent human listening, consented speaker recordings or duration-based phone
@@ -96,8 +96,6 @@ source artifact is not a runtime backup service; no recording or opt-in changed.
 
 ## Remaining acceptance gates
 
-- Physical phone controls and temporary-disconnection/recovery evidence; the
-  fresh user-confirmed Wi-Fi-off upload passed independently.
 - Consented enrollment and held-out recordings covering noise, distance, brief
   and overlapping speech and unknown people; report correct/false/abstained
   outcomes per pseudonymous identity and condition. Clustering suggestions remain off.
@@ -114,3 +112,70 @@ source artifact is not a runtime backup service; no recording or opt-in changed.
   remains unreleased because it missed the recall target.
 
 Live rollout and origin readback are recorded in INSTALL-NOTES.md after observation.
+
+## Scope update — October 3
+
+The user deferred temporary-disconnection/recovery to Later and requested all
+other remaining work. The earlier user-confirmed Wi-Fi-off upload remains valid;
+deferral does not create missing physical test evidence. Local processing of all
+recordings including the user's voice is authorized. Confirmed identities,
+participant consent and held-out ground truth are not inferred from that grant.
+
+Source reconciliation preserved 33 canonical files, 33 exact-HEAD conflicted
+variants, binary diff and hash manifest outside Dropbox before edits. Proven
+older source was restored; novel TODO changes were retained before factual
+status corrections and this user-requested deferral. The deployed readonly
+receiver was not replaced. Twelve private playback pairs and forty unknown-only
+candidate turns were prepared; no enrollment, listening approval, default change,
+background permission or suppression activation was performed.
+
+The second private playback pack contains twelve pairs passing objective level
+matching (within 0.2 LUFS), no-output-clipping and envelope-alignment screening.
+The first pack is retained, including four inconclusive alignment results; the
+new selection excludes those sources without asserting speech representativeness
+or subjective improvement. Source audio hashes remain unchanged. Identity-free
+candidate selection is preparation, not enrollment or a held-out speaker result.
+
+`scripts/evaluate-background-trial.py` validates a private, measured off/on
+manifest without contacting the phone or enabling anything. Each session requires
+at least four hours, matched device/build/activity coverage, no charging, recording
+duration within sixty seconds of elapsed time, verified clip receipts and no
+lost/failed/pending/duplicate clips. Extra battery discharge must be at most three
+percentage points; location coverage and observation age are reported, without an
+invented accuracy threshold. `manifest_validated` means reported inputs satisfy
+the protocol, not independently verified physical success. Missing measurements
+remain `unavailable`. Create an unfilled template in an existing owner-private
+directory outside the repository:
+
+```sh
+/opt/homebrew/bin/python3 scripts/evaluate-background-trial.py --write-template /absolute/private/trial.json
+/opt/homebrew/bin/python3 scripts/evaluate-background-trial.py --manifest /absolute/private/trial.json
+```
+
+Live October 3 readiness remains zero enrolled profiles, 524 unknown turns and
+one quiet-upload shadow day, with incomplete condition coverage and suppression
+off. The phone is accessible for read-only app-data inspection, but Mirroring
+targets a different phone and protected unlock is unavailable. No matched battery
+trial was started or claimed. Consent to local processing is already given; the
+remaining speaker dependency is confirmed identity and suitable labeled samples,
+not another request for that processing permission.
+
+The frozen 120-case retrieval experiment was rerun without holdout tuning:
+held-out recall remains 0.881 against 0.90, so experimental ranking remains
+unreleased. All 45 native Simulator tests passed with zero failures or skips,
+including a durable upload receipt from an isolated synthetic TLS receiver.
+The full Python suite passed 373 tests. Staged diff checks and active-credential/
+media scans passed for exactly four source/documentation files. Live authenticated
+health, verified immutable source identity, SQLite integrity, 56 complete clips,
+53 keyed/53 full-text indexes, event/cursor preservation, original audio ranges
+and four viewer assets passed. The remote machine probe confirmed search and
+citation reads while continuing to deny location, audio, human and mutation
+routes. The evaluator worker returned partial at its deadline; the lead completed
+input-hardening repairs and independent verification rather than counting that
+attempt as first-pass acceptance. No receiver restart or phone configuration
+change was necessary.
+
+### Later
+
+- Physical-phone temporary-disconnection/queued-upload recovery and remaining
+  physical-control reliability checks. Resume only when explicitly requested.

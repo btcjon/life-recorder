@@ -1,6 +1,6 @@
 # Planned improvements
 
-Checked items are implemented in source; deployment status is recorded separately in INSTALL-NOTES.md. Unchecked items remain planned, and new permissions are not enabled by this roadmap.
+Checked items are implemented in source; deployment status is recorded separately in INSTALL-NOTES.md. Unchecked items remain planned or require real evaluation evidence. New permissions and experimental defaults are not enabled by this roadmap.
 
 ## Prioritized delivery plan — October 2, 2026
 
@@ -15,10 +15,25 @@ separate from source completion.
 4. **Meaningful meeting timeline.** Combine manual start/end hints with suggested boundaries from gaps, participant evidence and topic changes. Keep suggestions editable; protect human overrides and label uncertainty. Acceptance: split/merge cases preserve every transcript span and stable source references, including missed manual end markers. Choose the topic-analysis method before implementation; no new external transcript flow by default.
 5. **Optional place context.** Start with manual places, then opt-in foreground snapshots. Attach the latest observation with age/accuracy rather than forcing GPS each minute. Define expiry and deletion propagation. Last-known phone location requires a separate agent permission; background/motion work follows device battery testing. Acceptance: denied/revoked/stale/delayed fixes never block recording or leak through current transcript credentials.
 
-Separate experiments: compare original/enhanced playback with user listening before restoring enhancement; keep quiet-upload suppression in shadow mode until speech-miss and battery/network measurements support activation. Fresh cellular-only upload testing remains a reliability check, not proof inferred from the successful connected-phone test.
+Separate experiments: compare original/enhanced playback with user listening before any default change; keep quiet-upload suppression in shadow mode until speech-miss and battery/network measurements support activation. The user-confirmed Wi-Fi-off upload passed; temporary-disconnection recovery is deferred below.
 
 Delivery evidence and remaining real-device/listening gates are tracked separately;
 no remote-backup destination or key custody decision is pending under this scope.
+
+## Active completion work — October 3, 2026
+
+- [x] Reconcile proven Dropbox source regressions with preservation of canonical/conflicted versions and novel edits. No running receiver replacement is needed for this source repair.
+- [x] Prepare twelve private level-matched playback pairs and objective clipping/alignment measurements. Listening approval, speech/noise representativeness and participant consent are separate evidence, not inferred from metrics.
+- [x] Prepare forty unknown-only clean-turn candidates for review. The user's local-processing permission is given; identities and held-out labels are still missing. No voice enrollment was performed.
+- [x] Add read-only background-trial manifest validation and a private unfilled template; validation never claims independently observed phone success.
+- [ ] Complete held-out speaker evaluation using confirmed identities, eligible references and separate test recordings.
+- [ ] Complete paired four-hour background off/on battery, coverage, audio-continuity and upload trials; preserve opt-in controls.
+- [ ] Complete seven representative quiet-upload shadow days and condition reviews, plus battery/storage/network comparisons. Upload suppression stays off.
+- [ ] Obtain listening approval before changing playback defaults. Original audio remains the recognition/enrollment input.
+
+## Later
+
+- [ ] Physical-phone temporary-disconnection/queued-upload recovery and remaining physical-control reliability checks. Explicitly deferred by the user on October 3; this is not a passed test and does not block the other active work. Do not perform connectivity changes for this test until resumed.
 
 ## Agent transcript retrieval — planned, 2026-09-27
 
@@ -26,15 +41,13 @@ Based on the 2026-09-24 Opus review. Preserve the read-only machine routes and e
 
 - [x] Freeze 120 synthetic questions with evidence ranges, tuning/held-out splits, person/time filters, multi-record queries and negatives. Limitations are reported by the evaluator.
 - [x] Evaluate offline normalized/stemmed lexical indexing and weighted partial coverage. Recall 0.8333 misses target 0.90; production ranking is unchanged.
-- [x] Implement match-centered excerpts with event ID, clip ID, clip-start timestamps, exact Unicode text offsets, and unknown passage attribution. Added October 2; live rollout status is recorded in INSTALL-NOTES.md.
-- [x] Implement anchored transcript reads with bounded preceding context, lossless continuation and revision checks. Added October 2; live rollout status is recorded in INSTALL-NOTES.md.
+- [x] Return match-centered excerpts with event ID, clip ID, clip-start timestamps, exact Unicode offsets and unknown passage attribution. Implemented and independently verified in the deployed release.
+- [x] Add anchored transcript reads with bounded preceding context, lossless continuation and stale-revision checks. Implemented and independently verified in the deployed release.
 - [x] Return bounded per-turn speaker/time information with confirmed, unconfirmed, and unknown states; quoted words retain unknown attribution.
 - [x] Verify an authorized remote machine search/read and continued denial of audio, human-only, and mutation routes. Passed during the October 2 rebuild; see INSTALL-NOTES.md.
 - [ ] Consider local hybrid semantic retrieval only if measured paraphrase misses remain after lexical improvements. No new external transcript flow by default.
 
 Proposed targets, subject to evaluation design: recall@10 >= 0.90, precision@5 >= 0.70, zero incorrect speaker attributions in the test set, p95 retrieval < 300 ms on the target Mac, and responses <= 16 KiB. These are goals, not achieved results.
-
-October 2 evaluation: `scripts/evaluate-agent-retrieval.py` provides 60 synthetic cases (45 literal, 10 natural-language, 5 paraphrase). Baseline `eaf160f` and the implementation both find 45 cases; all 45 matched previews now contain evidence versus zero before. Ranking/filter results are identical. The broader evaluation item above remains open: multiple-event/person-filter relevance cases and precision/recall evaluation need expansion before changing ranking. Location work remains planned.
 
 ## Location context hints — planned, 2026-09-27
 

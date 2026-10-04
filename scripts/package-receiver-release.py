@@ -11,14 +11,48 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import tarfile
 import tempfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'receiver'))
+import health
+import ui_assets
 
 RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
                   'assets/favicon-32.png', 'assets/life-recorder-icon.png',
                   'mac_context_probe.swift'}
 
-def package(project, output_root):
+def _frontend_files(project, revision, build, git):
+    """Accept a private frozen build, never paid source from the public archive."""
+    build = Path(build)
+    if not build.is_absolute() or build.is_symlink():
+        raise ValueError('Private absolute frontend build required')
+    info = build.stat()
+    if info.st_uid != os.getuid() or info.st_mode & 0o077:
+        raise ValueError('Frontend build must be owner-private')
+    metadata, files = ui_assets.read_build(build, revision)
+    archive = git('archive', '--format=tar', revision, 'web')
+    if len(archive) > 4 * 1024 * 1024:
+        raise ValueError('Frontend source archive exceeds package budget')
+    sources = {}
+    with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+        for index, item in enumerate(bundle.getmembers(), 1):
+            path = Path(item.name)
+            if (index > 512 or path.is_absolute() or '..' in path.parts or not path.parts
+                    or path.parts[0] != 'web' or not (item.isdir() or item.isfile())
+                    or any(part in ('vendor', 'node_modules', 'dist') for part in path.parts)):
+                raise ValueError('Unsafe frontend source archive')
+            if item.isfile():
+                if item.size > 1024 * 1024:
+                    raise ValueError('Frontend source input exceeds file budget')
+                sources[path.as_posix()] = hashlib.sha256(bundle.extractfile(item).read()).hexdigest()
+    if sources != metadata['source_files']:
+        raise ValueError('Frontend build does not match the complete committed source inputs')
+    return {health.VIEWER_ASSET_PREFIX + name: data for name, data in files.items()}
+
+
+def package(project, output_root, frontend_build=None):
     project, output_root = Path(project).resolve(), Path(output_root)
     if not output_root.is_absolute() or output_root.is_symlink():
         raise ValueError('Private absolute output root required')
@@ -40,6 +74,7 @@ def package(project, output_root):
     destination = output_root / revision
     if destination.exists():
         raise ValueError('Release already exists; never overwrite it')
+    frontend = {} if frontend_build is None else _frontend_files(project, revision, frontend_build, git)
     archive = git('archive', '--format=tar', revision, 'receiver')
     if len(archive) > 6 * 1024 * 1024:
         raise ValueError('Receiver archive exceeds package budget')
@@ -74,6 +109,16 @@ def package(project, output_root):
                 target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 write(target, content)
                 files[relative] = hashlib.sha256(content).hexdigest()
+        for relative, content in frontend.items():
+            total += len(content)
+            if total > 4 * 1024 * 1024 or len(files) >= 128:
+                raise ValueError('Receiver source limit')
+            target = staging / 'receiver' / relative
+            target.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            if target.exists():
+                raise ValueError('Frontend may not replace committed receiver files')
+            write(target, content)
+            files[relative] = hashlib.sha256(content).hexdigest()
         if not 2 <= len(files) <= 128 or not {'health.py', 'receiver.py'} <= files.keys():
             raise ValueError('Incomplete receiver source')
         metadata = {'version': 1, 'source_revision': revision, 'source_files': files}
@@ -119,5 +164,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--project', type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument('--output-root', type=Path, required=True)
+    parser.add_argument('--frontend-build', type=Path,
+                        help='Owner-private generated UI build with exact-commit input/output provenance')
     args = parser.parse_args()
-    print(json.dumps(package(args.project, args.output_root)))
+    print(json.dumps(package(args.project, args.output_root, args.frontend_build)))

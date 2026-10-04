@@ -48,6 +48,16 @@ The receiver writes the combined transcript to `life.md`, daily Markdown files t
 
 ## Mac viewer
 
+The premium React viewer provides Recordings, Review, People, Context and Health,
+with responsive list/detail panes, light/dark mode and a persistent audio player.
+It uses privately licensed shadcn components, not a second server or database.
+Its static build is served by the same authenticated Python viewer. `/ui-v2/`
+opens it explicitly; `/legacy/` always opens the original viewer. The existing
+launch job's `LIFE_RECORDER_UI_V2_DEFAULT=1` selects the new default only when its
+verified bundle is available. Identity and event edits lock after conflicts or
+uncertain responses until a successful readback; voice enrollment remains opt-in.
+See [UI parity](docs/ui-parity.md) and [web build instructions](web/README.md).
+
 The receiver also serves a loopback-only authenticated viewer at `http://127.0.0.1:8767`. Open `open-viewer.command` from the private data directory to launch it without copying its token into the browser history. The viewer provides a day picker, transcript search, capture-session markers, sidebar event groups, speaker badges, and pending/error counts. Flat list restores one row per clip.
 
 Optional remote viewing for `lr.genr8ive.ai` stays bound to `127.0.0.1:8767`. Enable it with `--viewer-remote-host lr.genr8ive.ai` plus Cloudflare Access `--access-team-domain` and `--access-aud` (or `LIFE_RECORDER_ACCESS_TEAM_DOMAIN` / `LIFE_RECORDER_ACCESS_AUD`). The origin then accepts that exact Host, exact `https://lr.genr8ive.ai` Origin on mutations, and a verified `Cf-Access-Jwt-Assertion` RS256 JWT. Local `open-viewer.command` bearer flow is unchanged. Do not publish receiver port 8766. Install `PyJWT[crypto]` from `requirements-viewer.txt`.

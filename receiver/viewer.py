@@ -19,6 +19,7 @@ from agent_api import http as agent_http
 import event_edits
 import speaker_review
 import speaker_identity
+import ui_assets
 from agent_api.errors import AgentError
 
 VIEWER_PORT = 8767
@@ -151,6 +152,11 @@ def display_blocks(chunks: list[dict]) -> list[dict]:
 CSP = (
     "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; media-src 'self' blob:; "
     "connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+)
+# The locked Base UI build emits this fixed, non-data-bearing scrollbar rule. Only the
+# new viewer admits its exact hash; inline attributes/scripts remain blocked.
+UI_CSP = CSP + (
+    "; style-src-elem 'self' 'sha256-kLmvWqfziFavKtqHqRsb90f006UAK2Dmd0It5Iz2KFA=';"
 )
 LAUNCHER = """#!/bin/zsh
 set -euo pipefail
@@ -2485,7 +2491,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         self.send_header("Cache-Control", "no-store")
         self.send_header("Referrer-Policy", "no-referrer")
-        self.send_header("Content-Security-Policy", CSP)
+        self.send_header("Content-Security-Policy", UI_CSP if getattr(self, '_ui_response', False) else CSP)
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Connection", "close")
         if extra:
@@ -2501,6 +2507,40 @@ class ViewerHandler(BaseHTTPRequestHandler):
 
     def _json(self, status: int, payload: dict, extra=None):
         self._send(status, json.dumps(payload).encode(), "application/json", extra)
+
+    def _new_viewer(self, path, include_body=True):
+        """Only the mounted bundle; never fallback API/audio to frontend HTML."""
+        default = getattr(self.server, 'ui_v2_default', False)
+        if path == '/' and default:
+            path = '/ui-v2/'
+        if path == '/ui-v2':
+            path = '/ui-v2/'
+        if not path.startswith('/ui-v2/'):
+            return False
+        self._ui_response = True
+        if self._is_remote_host() and not self._authorized():
+            self._json(401, {'error': 'Unauthorized'})
+            return True
+        bundle = getattr(self.server, 'ui_bundle', None)
+        if bundle is None:
+            self._json(503, {'error': 'New viewer is unavailable; use /legacy/'})
+            return True
+        try:
+            asset = bundle.read(path)
+        except (OSError, ui_assets.Unavailable):
+            self._json(503, {'error': 'Viewer asset verification is unavailable'})
+            return True
+        if asset is None:
+            self._json(404, {'error': 'Not found'})
+            return True
+        body, content_type = asset
+        if include_body:
+            self._send(200, body, content_type)
+        else:
+            self.send_response(200)
+            self._headers(content_type, len(body))
+            self.close_connection = True
+        return True
 
     def do_OPTIONS(self):
         self.send_response(403)
@@ -2629,6 +2669,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return _access_unavailable(self)
         parsed = urlparse(self.path)
         path = parsed.path
+        try:
+            if self._new_viewer(path, include_body=False):
+                return
+        except VerificationUnavailable:
+            return _access_unavailable(self)
+        if path in ('/legacy', '/legacy/'):
+            path = '/'
         if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
                     "/app-icon.png", "/apple-touch-icon.png"):
             if self._is_remote_host() and not self._authorized():
@@ -2674,6 +2721,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
             return _access_unavailable(self)
         parsed = urlparse(self.path)
         path = parsed.path
+        try:
+            if self._new_viewer(path):
+                return
+        except VerificationUnavailable:
+            return _access_unavailable(self)
+        if path in ('/legacy', '/legacy/'):
+            path = '/'
         if path in ("/", "/app.css", "/app.js", "/favicon-16.png", "/favicon-32.png",
                     "/app-icon.png", "/apple-touch-icon.png"):
             if self._is_remote_host() and not self._authorized():
@@ -2930,7 +2984,8 @@ def remote_access_config(host=None, team_domain=None, audience=None, issuer=None
     return RemoteAccessConfig.from_values(host or DEFAULT_REMOTE_HOST, team_domain, audience, issuer)
 
 
-def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote=None):
+def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote=None,
+                 ui_root=None, ui_default=None):
     write_launcher(inbox.root)
     token = ensure_viewer_token(inbox.root)
     if host != VIEWER_HOST:
@@ -2946,6 +3001,17 @@ def start_viewer(inbox, host: str = VIEWER_HOST, port: int = VIEWER_PORT, remote
     server.remote_access = remote
     server.access_verifier = AccessVerifier(remote) if remote else None
     server.agent_limiter = agent_http.Limiter()
+    server.ui_v2_default = (os.environ.get('LIFE_RECORDER_UI_V2_DEFAULT') == '1'
+                            if ui_default is None else bool(ui_default))
+    server.ui_bundle = None
+    server.ui_status = {'state': 'not_configured'}
+    root = Path(__file__).with_name('assets') / 'viewer-v2' if ui_root is None else Path(ui_root)
+    if root.exists():
+        try:
+            server.ui_bundle = ui_assets.Bundle(root, inbox.health_source_revision)
+            server.ui_status = server.ui_bundle.status()
+        except (OSError, ui_assets.Unavailable):
+            server.ui_status = {'state': 'unavailable', 'reason': 'viewer_bundle_invalid'}
     inbox.viewer_error = None
     inbox.viewer_server = server
     thread = threading.Thread(target=server.serve_forever, daemon=True)

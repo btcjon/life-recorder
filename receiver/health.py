@@ -3,6 +3,7 @@ from pathlib import Path
 import hashlib
 import json
 import os
+import re
 import shutil
 import stat
 import time
@@ -13,6 +14,29 @@ MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
                   'assets/favicon-32.png', 'assets/life-recorder-icon.png',
                   'mac_context_probe.swift'}
+
+VIEWER_ASSET_PREFIX = 'assets/viewer-v2/'
+VIEWER_PROVENANCE = VIEWER_ASSET_PREFIX + 'build-provenance.json'
+_VIEWER_ASSET_NAME = re.compile(r'^[A-Za-z0-9][A-Za-z0-9_.-]{0,159}$')
+
+
+def viewer_asset_name(relative):
+    """Bounded generated bundle paths, never a general filesystem allowlist."""
+    if not isinstance(relative, str):
+        return False
+    if relative == 'index.html':
+        return True
+    pieces = relative.split('/')
+    if (not 2 <= len(pieces) <= 4 or pieces[0] not in ('assets', 'fonts')
+            or any(not _VIEWER_ASSET_NAME.fullmatch(part) or '..' in part for part in pieces)):
+        return False
+    return Path(pieces[-1]).suffix in ('.js', '.css', '.woff2', '.png')
+
+
+def allowed_release_asset(relative):
+    return (relative in RELEASE_ASSETS or relative == VIEWER_PROVENANCE
+            or (relative.startswith(VIEWER_ASSET_PREFIX)
+                and viewer_asset_name(relative.removeprefix(VIEWER_ASSET_PREFIX))))
 
 
 def source_identity(root=None, manifest_pin=None):
@@ -67,7 +91,7 @@ def source_identity(root=None, manifest_pin=None):
             if path.suffix in ('.pyc', '.pyo'):
                 raise ValueError('release_bytecode_cache')
             relative = path.relative_to(root).as_posix()
-            if path.suffix != '.py' and relative not in RELEASE_ASSETS:
+            if path.suffix != '.py' and not allowed_release_asset(relative):
                 if path == manifest:
                     continue
                 raise ValueError('release_extra_file')
@@ -165,7 +189,9 @@ def snapshot(inbox, device_id=None, now=None):
         storage = {"available_bytes": None, "reserve_bytes": STORAGE_RESERVE_BYTES, "low_space": None, "state": "unavailable"}
     result.update(storage=storage, stages=stages,
                   runtime={"started_at": inbox.health_started_at, "source_revision": inbox.health_source_revision,
-                           "source_identity": dict(inbox.health_source_identity)},
+                           "source_identity": dict(inbox.health_source_identity),
+                           "viewer_ui": dict(getattr(getattr(inbox, 'viewer_server', None),
+                                                      'ui_status', {'state': 'not_configured'}))},
                   state="needs_attention" if queue["needs_attention"] or storage["state"] != "ok"
                   else "delayed" if queue["delayed"] else "ok")
     storage.update(original_audio_bytes=audio_bytes, pinned_count=pinned_count,

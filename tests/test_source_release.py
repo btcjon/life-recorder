@@ -183,3 +183,73 @@ class SourceReleaseTests(unittest.TestCase):
         direct.symlink_to(root, target_is_directory=True)
         with patch.object(health, '__file__', str(direct/'health.py')):
             self.assertEqual(health.source_identity(manifest_pin=pin)['reason'], 'release_symlink')
+
+    def frontend(self):
+        from test_ui_assets import fixture
+        (self.project/'web/src').mkdir(parents=True)
+        inputs = {'web/package-lock.json': b'{}\n', 'web/src/main.tsx': b'// synthetic own source\n'}
+        for name, data in inputs.items():
+            (self.project/name).write_bytes(data)
+        self.git('add', 'web')
+        self.git('commit', '-qm', 'own frontend inputs')
+        root = self.base/'frontend-build'
+        metadata, files = fixture(root, self.git('rev-parse', 'HEAD'),
+            {name: hashlib.sha256(data).hexdigest() for name, data in inputs.items()})
+        return root, metadata, files
+
+    def test_private_frontend_is_packaged_and_attested_without_vendoring_paid_source(self):
+        build, metadata, assets = self.frontend()
+        result = release.package(self.project, self.output, build)
+        root = Path(result['receiver_script']).parent
+        identity = health.source_identity(root, result['manifest_sha256'])
+        self.assertEqual(identity['state'], 'verified')
+        self.assertEqual(identity['source_file_count'], 2 + len(assets) + 1)
+        for name, data in assets.items():
+            self.assertEqual((root/health.VIEWER_ASSET_PREFIX/name).read_bytes(), data)
+        self.assertFalse((root/'web/vendor').exists())
+        changed = root/health.VIEWER_ASSET_PREFIX/'assets/app-abc.js'
+        changed.chmod(0o644)
+        changed.write_bytes(b'altered JS')
+        changed.chmod(0o444)
+        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['reason'], 'release_source_changed')
+
+    def test_frontend_input_revision_complete_source_and_bytes_must_match(self):
+        build, metadata, _assets = self.frontend()
+        provenance = build/'build-provenance.json'
+        for change in ({'source_revision': 'f'*40},
+                       {'source_files': {'web/package-lock.json': '0'*64}},
+                       {'source_files': metadata['source_files'] | {'web/extra.tsx': 'e'*64}}):
+            provenance.write_text(json.dumps(metadata | change))
+            with self.assertRaises(ValueError):
+                release.package(self.project, self.output, build)
+        provenance.write_text(json.dumps(metadata))
+        (build/'assets/app-abc.js').write_bytes(b'different compiled bytes')
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output, build)
+
+    def test_frontend_rejects_maps_unlisted_files_links_and_nonprivate_directory(self):
+        build, _metadata, _assets = self.frontend()
+        unexpected = build/'assets/app-abc.js.map'
+        unexpected.write_bytes(b'paid source must not be distributed')
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output, build)
+        unexpected.unlink()
+        build.chmod(0o755)
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output, build)
+        build.chmod(0o700)
+        alias = self.base/'build-link'
+        alias.symlink_to(build, target_is_directory=True)
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output, alias)
+
+    def test_frontend_rejects_paid_vendor_tree_in_committed_archive(self):
+        build, metadata, _assets = self.frontend()
+        (self.project/'web/vendor').mkdir()
+        (self.project/'web/vendor/paid.tsx').write_bytes(b'licensed source')
+        self.git('add', 'web/vendor')
+        self.git('commit', '-qm', 'unsafe fixture')
+        metadata['source_revision'] = self.git('rev-parse', 'HEAD')
+        (build/'build-provenance.json').write_text(json.dumps(metadata))
+        with self.assertRaises(ValueError):
+            release.package(self.project, self.output, build)

@@ -33,3 +33,7 @@ days/
 .env
 .env.*
 .transcription-venv/
+web/node_modules/
+web/vendor/
+web/dist/
+receiver/assets/viewer-v2/

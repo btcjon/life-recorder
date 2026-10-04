@@ -38,6 +38,22 @@ owner-private cache and checks both source and executable digests before use.
 `LIFE_RECORDER_MAC_CONTEXT=0` disables it; browser playback metadata is not configured.
 This is a source deployment artifact, not a runtime-backup service.
 
+For the optional premium viewer, first run `scripts/build-viewer.py` with the
+project, an existing owner-private `--output-root`, and the owner's ignored
+`web/vendor` as `--vendor-root`. It freezes committed frontend source/lockfile
+and private licensed inputs. Pass its returned directory to packaging with
+`--frontend-build`. Generated JS/CSS/fonts and build provenance are bounded and
+manifest-covered; no premium source or generated build is committed publicly.
+Do not use a mutable development bundle for the live receiver.
+
+Verify `/ui-v2/` beside `/legacy/` before setting
+`LIFE_RECORDER_UI_V2_DEFAULT=1` in the existing job. A changed plist requires
+bootout/bootstrap of that same job, not just kickstart. Preserve all other
+arguments and environment values. Disable that flag for a legacy-default
+rollback, or restore the prior source path/manifest pin; never restore an old
+database over newer uploads. A missing/invalid new bundle falls back to legacy
+at `/`, while `/ui-v2/` reports unavailable explicitly.
+
 The receiver verifies its complete Python tree before application imports. A
 missing or mismatched pin, mutable source, added/deleted file, symlink or bytecode
 cache produces explicit unavailable provenance, not a guessed Git HEAD. Health

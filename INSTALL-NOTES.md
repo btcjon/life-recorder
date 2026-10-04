@@ -4,6 +4,63 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-04 context and premium viewer completion, 14:19 UTC
+
+Both accepted Astra plans are implemented. Context source was committed and
+deployed earlier as `7f3d30e925f2dce2030068a9b8abad168e1b870f`; phone build 1041
+was installed and launched with pairing preserved and recording disabled at its
+installation readback. The final receiver/UI release is
+`c4395d0784e3a99be9ab29afb7e02ac2cab8bada`, with 45 manifest-covered files,
+including five frontend assets and private build provenance. The exact frozen
+frontend consumes 50 committed authored inputs and 32 licensed private inputs;
+generated assets total 959,563 bytes. No paid source, fonts, compiled assets,
+tokens or runtime data were committed. Nothing was pushed publicly.
+
+The existing receiver job now uses that readonly release and manifest pin.
+`LIFE_RECORDER_UI_V2_DEFAULT=1` makes the premium viewer the default. Recordings,
+Review, People, Context and Health are available; `/legacy/` remains usable with
+the same human session. No Node production server, authentication replacement
+or parallel database was added. Base UI's fixed scrollbar rule has one exact
+style-element CSP hash; legacy CSP and inline-script restrictions are unchanged.
+
+Verification: 408 Python tests passed; 53 frontend tests passed; lint/typecheck
+and production build passed; dependency audit reported zero vulnerabilities.
+The preceding context build passed 58 native tests, none skipped; UI work did
+not change iOS. Synthetic browser checks cover all views, 320/390px layouts,
+long-name/transcript wrapping, light/dark/reduced-motion rendering, keyboard
+dialog and Back focus, stable audio, and confirm/undo with no sample enrollment.
+No real naming or withdrawal was performed for testing. Astra's final review
+caught proxy/aborted-response save uncertainty; the repaired flows lock edits
+until successful reread, with post-commit 502/504/abort regression tests.
+
+A fresh consistent private backup held 57 complete clips and 54 indexed
+transcripts. Two rehearsal passes preserved all 48 table hashes and integrity.
+By final live checks the service had 80 complete clips and 77/77 keyed/FTS
+transcripts; baseline event IDs, cursor key, people and enrolled samples were
+preserved. Original audio range playback returned 206. Upload health was 200
+authenticated and 401 unauthenticated. The five served asset hashes and GET/HEAD
+responses matched the pinned build; malformed/unlisted paths stayed blocked.
+Live machine search returned 200; six human/UI/audio/context reads and three
+mutation routes returned 403. Remote unauthenticated UI redirected to login.
+Listeners remained `*:8766` and `127.0.0.1:8767`, final PID 88651.
+
+Side-by-side acceptance preceded default cutover. The default reload initially
+returned launchctl error 5; readback proved the job absent and listeners down.
+One narrowed bootstrap retry succeeded, followed by all live checks above.
+Only script path, manifest pin and the new default flag changed. No database
+restore, setup rerun, pairing change, enrollment change or recording activation
+occurred. Rollback is the prior source/config or legacy-default flag, never an
+old database over newer uploads. The receiver error log did not grow during
+the bounded final observation.
+
+Live context includes public CoreAudio output-IO observations and categorical
+phone audio/call/capture observations; the Mac helper reports ready/running.
+This is not proof that a particular YouTube/X tab is audible or recorded.
+Browser media metadata remains unconfigured. Physical call and locked-screen
+callback coverage remain unverified. A later read-only phone recheck was blocked
+by CoreDevice connectivity, so installation-time preferences are not asserted
+as its current state. No recording/location switch was changed by this rollout.
+
 ## 2026-10-02 roadmap source and receiver rollout
 
 ### Verified launch-source repair, 17:48 UTC

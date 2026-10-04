@@ -1,4 +1,4 @@
-import type { Chunk, DayPayload, DisplayBlock, SpeakerTurn, SpeechEvent } from "../api/types";
+import type { Chunk, DayPayload, DisplayBlock, SpeakerTurn, SpeechEvent, SpeechEventChunk } from "../api/types";
 
 export type TurnGroup = {
   key: string;
@@ -10,15 +10,15 @@ export type TurnGroup = {
 };
 
 export type ListRow =
-  | { type: "interval"; key: string; label: string; when: string; manual: boolean }
-  | { type: "session"; key: string; text: string }
-  | { type: "event"; key: string; block: DisplayBlock; members: Chunk[]; open: boolean }
+  | { type: "heading"; key: string; label: string }
   | { type: "chunk"; key: string; chunk: Chunk }
-  | { type: "speech"; key: string; event: SpeechEvent };
+  | { type: "group"; key: string; block: DisplayBlock; members: Chunk[]; matchId: string | null };
+
+export type TextSegment = { text: string; match: boolean };
 
 export function preview(text: string | undefined): string {
   const clean = (text || "").replace(/\s+/g, " ").trim();
-  return clean ? clean.slice(0, 90) + (clean.length > 90 ? "…" : "") : "No transcript yet";
+  return clean ? clean.slice(0, 90) + (clean.length > 90 ? "…" : "") : "No transcript";
 }
 
 export function turnCount(chunk: Chunk): number {
@@ -26,28 +26,115 @@ export function turnCount(chunk: Chunk): number {
   return Number(chunk.speaker_turn_count || 0) || turns.length;
 }
 
-export function isHiddenQuiet(chunk: Chunk, showQuiet: boolean): boolean {
-  if (showQuiet) return false;
-  const text = chunk.transcript || "";
+export function isHiddenQuiet(chunk: Chunk, showQuiet: boolean, showPending = false): boolean {
   if (chunk.status === "needs_attention") return false;
-  return !text.trim() && turnCount(chunk) === 0;
+  if (chunk.status && chunk.status !== "complete" && chunk.status !== "pending") return false;
+  const blank = !(chunk.transcript || "").trim() && turnCount(chunk) === 0;
+  if (!blank) return false;
+  if (chunk.status === "pending") return !showPending;
+  return !showQuiet;
 }
 
-export function visibleChunks(chunks: Chunk[], query: string, showQuiet: boolean): Chunk[] {
-  const needle = query.toLowerCase();
+export function visibleChunks(chunks: Chunk[], query: string, showQuiet: boolean, showPending = false): Chunk[] {
+  const needle = query.trim().toLowerCase();
   return chunks.filter((chunk) => {
-    if (isHiddenQuiet(chunk, showQuiet)) return false;
+    if (isHiddenQuiet(chunk, showQuiet, showPending)) return false;
     const text = chunk.transcript || "";
-    return !needle || text.toLowerCase().includes(needle) || (chunk.started_local || "").toLowerCase().includes(needle);
+    return !needle || text.toLowerCase().includes(needle) || (chunk.started_local || chunk.started || "").toLowerCase().includes(needle);
   });
 }
 
-export function audioStateLabel(chunk: Chunk): string {
-  if (chunk.status === "pending") return "Processing";
-  if (chunk.status === "needs_attention") return "Processing needs attention";
-  if (chunk.status !== "complete") return "Processing failed";
-  if (!chunk.audio_playable) return "Audio not kept";
+export function transcriptState(chunk: Chunk): string {
+  if (chunk.status === "pending") return "Processing transcript";
+  if (chunk.status === "needs_attention" || (chunk.status && chunk.status !== "complete" && chunk.status !== "pending")) {
+    return "Transcript processing needs attention";
+  }
+  if (!(chunk.transcript || "").trim() && turnCount(chunk) === 0) return "No speech detected";
   return "";
+}
+
+export function audioRetentionLabel(chunk: Chunk): string {
+  if (!chunk.status || chunk.status === "pending" || chunk.status === "needs_attention" || chunk.status !== "complete") return "";
+  return chunk.audio_playable ? "" : "Audio no longer retained";
+}
+
+export function speakerPendingLabel(chunk: Chunk): string {
+  if (chunk.voice_pending) return "Speaker analysis pending";
+  const status = chunk.diarization_status || chunk.diarization?.outcome || "";
+  if (status === "pending" || status === "running") return "Speaker analysis pending";
+  return "";
+}
+
+export function audioStateLabel(chunk: Chunk): string {
+  return [transcriptState(chunk), audioRetentionLabel(chunk), speakerPendingLabel(chunk)].filter(Boolean).join(" · ");
+}
+
+export function hourHeading(value: string | undefined): string {
+  const match = (value || "").match(/(\d{4}-\d{2}-\d{2})[ T](\d{2}):\d{2}/);
+  return match ? match[1] + " " + match[2] + ":00" : "Time unknown";
+}
+
+export function clockLabel(value: string | undefined): string {
+  const match = (value || "").match(/(\d{2}:\d{2})/);
+  return match?.[1] || value || "Recording";
+}
+
+export function highlightSegments(text: string, query: string): TextSegment[] {
+  const source = text || "";
+  const needle = query.trim();
+  if (!source) return [];
+  if (!needle) return [{ text: source, match: false }];
+  const lower = source.toLowerCase();
+  const want = needle.toLowerCase();
+  const parts: TextSegment[] = [];
+  let cursor = 0;
+  while (cursor < source.length) {
+    const at = lower.indexOf(want, cursor);
+    if (at < 0) {
+      parts.push({ text: source.slice(cursor), match: false });
+      break;
+    }
+    if (at > cursor) parts.push({ text: source.slice(cursor, at), match: false });
+    parts.push({ text: source.slice(at, at + want.length), match: true });
+    cursor = at + want.length;
+  }
+  return parts.filter((part) => part.text.length > 0);
+}
+
+export function eventChunkId(part: SpeechEventChunk): string {
+  return part.chunk_id || part.id || "";
+}
+
+export function eventTimeRange(event: SpeechEvent): string {
+  const start = event.started_local || event.started || "Unknown start";
+  const end = event.ended_local || event.ended || "unknown end";
+  const endLabel = event.ended_local && start.slice(0, 10) === end.slice(0, 10) ? end.slice(11) : end;
+  const playable = Number(event.playable_duration || event.duration || 0);
+  return start + " – " + endLabel + (playable ? " · " + playable.toFixed(1) + "s playable" : "");
+}
+
+export function eventSources(event: SpeechEvent, chunks: Chunk[]): Array<{ id: string; label: string; present: boolean; started?: string }> {
+  return (event.chunks || []).map((part) => {
+    const id = eventChunkId(part);
+    const chunk = chunks.find((item) => item.id === id);
+    return {
+      id,
+      label: chunk?.started_local || chunk?.started || part.clip_started || (id ? "Recording " + id.slice(0, 8) : "Unknown recording"),
+      present: !!chunk,
+      started: chunk?.started || part.clip_started || undefined,
+    };
+  }).filter((item) => item.id);
+}
+
+export function derivedScopeCopy(sourceCount: number): string {
+  if (sourceCount > 1) return "This speech-only clip includes " + sourceCount + " recordings. It is not an enhancement of only the selected recording.";
+  if (sourceCount === 1) return "This speech-only clip comes from one source recording. Enhanced audio is a separate copy and does not share that recording's clock.";
+  return "This speech-only clip has no source recording in the loaded day.";
+}
+
+export function relatedEvents(payload: DayPayload | null, chunkId: string | null): SpeechEvent[] {
+  if (!payload || !chunkId) return [];
+  return (payload.events || []).filter((event) => (event.chunks || []).some((part) => eventChunkId(part) === chunkId));
 }
 
 export function recordedLength(seconds: number): string {
@@ -98,67 +185,78 @@ export function suggestionText(block: DisplayBlock): string {
     .join("; ");
 }
 
-export function buildRecordingList(
-  payload: DayPayload | null,
-  options: { query: string; showQuiet: boolean; flat: boolean; expanded: ReadonlySet<string> },
-): ListRow[] {
-  if (!payload) return [];
-  const rows: ListRow[] = [];
-  (payload.intervals || []).forEach((item, index) => {
-    rows.push({
-      type: "interval",
-      key: "interval-" + index,
-      label: item.label || (item.source === "manual" ? "Manual meeting" : "Possible event"),
-      when: (item.started_at || "") + " -> " + (item.ended_at || "open"),
-      manual: item.source === "manual",
-    });
-  });
-  (payload.sessions || []).forEach((session, index) => {
-    rows.push({
-      type: "session",
-      key: "session-" + index,
-      text: (session.title || "Session") + " · " + (session.started || ""),
-    });
-  });
-  const chunks = visibleChunks(payload.chunks || [], options.query, options.showQuiet);
-  const visible = new Set(chunks.map((chunk) => chunk.id));
+export type ListOptions = {
+  query: string;
+  showQuiet: boolean;
+  showPending?: boolean;
+  groups?: boolean;
+};
+
+function byStart(left: Chunk, right: Chunk): number {
+  return String(left.started || left.started_local || left.id).localeCompare(String(right.started || right.started_local || right.id));
+}
+
+function chunkMatches(chunk: Chunk, needle: string): boolean {
+  if (!needle) return false;
+  return (chunk.transcript || "").toLowerCase().includes(needle) || (chunk.started_local || chunk.started || "").toLowerCase().includes(needle);
+}
+
+export function groupMembers(payload: DayPayload, block: DisplayBlock, showQuiet: boolean, showPending: boolean): Chunk[] {
   const byId = new Map((payload.chunks || []).map((chunk) => [chunk.id, chunk]));
-  const rendered = new Set<string>();
-  const blocks: DisplayBlock[] = options.flat
-    ? chunks.map((chunk) => ({ kind: "chunk", chunk_id: chunk.id }))
-    : payload.display_blocks || chunks.map((chunk) => ({ kind: "chunk", chunk_id: chunk.id }));
-  const pushChunk = (chunk: Chunk | undefined) => {
-    if (!chunk || rendered.has(chunk.id) || !visible.has(chunk.id)) return;
-    rendered.add(chunk.id);
-    rows.push({ type: "chunk", key: chunk.id, chunk });
-  };
-  for (const block of blocks) {
-    if (!options.flat && block.kind === "event") {
-      const members = (block.chunk_ids || []).map((id) => byId.get(id)).filter((chunk): chunk is Chunk => !!chunk && visible.has(chunk.id));
-      const named = members.filter((chunk) => (chunk.transcript || "").trim());
-      const manual = block.source === "manual";
-      if ((manual && members.length) || named.length >= 2) {
-        const id = block.id || members.map((chunk) => chunk.id).join("-");
-        rows.push({ type: "event", key: id, block: { ...block, id }, members, open: options.expanded.has(id) });
-        for (const chunk of members) rendered.add(chunk.id);
-        continue;
-      }
-      for (const chunk of members) pushChunk(chunk);
-      continue;
+  return (block.chunk_ids || [])
+    .map((id) => byId.get(id))
+    .filter((chunk): chunk is Chunk => !!chunk && !isHiddenQuiet(chunk, showQuiet, showPending))
+    .sort(byStart);
+}
+
+export function qualifiesAsGroup(block: DisplayBlock, members: Chunk[]): boolean {
+  if (block.kind !== "event" || !members.length) return false;
+  if (block.source === "manual") return true;
+  return members.filter((chunk) => (chunk.transcript || "").trim()).length >= 2;
+}
+
+export function buildRecordingList(payload: DayPayload | null, options: ListOptions): ListRow[] {
+  if (!payload) return [];
+  const showPending = !!options.showPending;
+  if (options.groups) {
+    const needle = options.query.trim().toLowerCase();
+    const rows: ListRow[] = [];
+    for (const block of payload.display_blocks || []) {
+      if (block.kind !== "event") continue;
+      const members = groupMembers(payload, block, options.showQuiet, showPending);
+      if (!qualifiesAsGroup(block, members)) continue;
+      const match = members.find((chunk) => chunkMatches(chunk, needle)) || null;
+      const titleHit = needle && (block.title || "").toLowerCase().includes(needle);
+      if (needle && !match && !titleHit) continue;
+      const id = block.id || (block.chunk_ids || []).join("-");
+      rows.push({ type: "group", key: id, block: { ...block, id }, members, matchId: match?.id || null });
     }
-    pushChunk(byId.get(block.chunk_id || ""));
+    return rows;
   }
-  const needle = options.query.toLowerCase();
-  for (const event of payload.events || []) {
-    const label = event.started_local || event.id;
-    if (needle && !label.toLowerCase().includes(needle) && !event.id.toLowerCase().includes(needle)) continue;
-    rows.push({ type: "speech", key: "speech-" + event.id, event });
+  const chunks = visibleChunks(payload.chunks || [], options.query, options.showQuiet, showPending).slice().sort(byStart);
+  const rows: ListRow[] = [];
+  let heading = "";
+  for (const chunk of chunks) {
+    const label = hourHeading(chunk.started_local || chunk.started);
+    if (label !== heading) {
+      heading = label;
+      rows.push({ type: "heading", key: "heading-" + label, label });
+    }
+    rows.push({ type: "chunk", key: chunk.id, chunk });
   }
   return rows;
 }
 
 export function hasPlayableRows(rows: ListRow[]): boolean {
-  return rows.some((row) => row.type === "chunk" || row.type === "event" || row.type === "speech");
+  return rows.some((row) => row.type === "chunk" || row.type === "group");
+}
+
+export function firstSearchTarget(rows: ListRow[]): { id: string; kind: "chunk" | "group" } | null {
+  for (const row of rows) {
+    if (row.type === "chunk") return { id: row.chunk.id, kind: "chunk" };
+    if (row.type === "group") return { id: row.key, kind: "group" };
+  }
+  return null;
 }
 
 export function formatTime(value: number): string {
@@ -285,9 +383,16 @@ export function cleanSeconds(group: TurnGroup): number {
   return group.turns.reduce((sum, turn) => sum + (Number(turn.clean_seconds) || 0), 0);
 }
 
-export function selectionStillPresent(payload: DayPayload, kind: "chunk" | "event", id: string | null): boolean {
+export function selectionStillPresent(payload: DayPayload, kind: "chunk" | "event" | "group", id: string | null): boolean {
   if (!id) return false;
   if (kind === "event") return (payload.events || []).some((event) => event.id === id);
+  if (kind === "group") {
+    return (payload.display_blocks || []).some((block) => {
+      if (block.kind !== "event") return false;
+      const key = block.id || (block.chunk_ids || []).join("-");
+      return key === id;
+    });
+  }
   return (payload.chunks || []).some((chunk) => chunk.id === id);
 }
 
@@ -295,7 +400,7 @@ export function toPlayableChunk(chunk: Chunk) {
   return {
     id: chunk.id,
     kind: "chunk" as const,
-    audioPlayable: !!chunk.audio_playable,
+    audioPlayable: !!chunk.audio_playable && (!chunk.status || chunk.status === "complete"),
     enhancedPlayable: false,
     label: chunk.started_local || chunk.started || "Recording",
     pinned: !!chunk.audio_pinned,

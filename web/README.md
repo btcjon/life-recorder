@@ -34,14 +34,15 @@ database.
 
 ## UI and safety
 
+- Recordings and People stay in the top bar. Review, Context and Health stay on their direct routes under More. There is no second sidebar.
+- The recording list defaults to individual recordings. Groups is a secondary view for saved and suggested boundaries. Speech-only clips stay in Audio options, not a parallel list.
+- Choosing a row opens text. Play is a separate control. Naming opens the picker and does not start audio. Sample enrollment stays off unless checked.
 - Recordings, Review, People, Context and Health call the same-origin human APIs.
 - Local token bootstrap uses a fragment once, clears it, and stores the token only
   in session storage. Remote access uses the existing Access session.
 - Suggested identities are unconfirmed. Sample enrollment defaults off and is a
   separate explicit choice. Conflicts require a successful reread before saving.
-- Playback lives outside the views. Filtering and navigation do not replace its
-  source. On narrow screens, detail uses a single main pane with Back so global
-  audio controls remain reachable. Premium navigation still uses the Sheet.
+- Playback lives outside the views and changes only when you press Play. Filtering, refresh, Back and speaker loads do not replace its source. If the selected recording differs, the player says what is still playing. On narrow screens, detail uses one pane with Back so the player stays reachable.
 - Context states describe observations, not speech sources or causes. Stale or
   unknown phone state is not inactivity. Voice diagnostics are an explicit read.
 - The new viewer CSP permits only the exact fixed Base UI scrollbar style by

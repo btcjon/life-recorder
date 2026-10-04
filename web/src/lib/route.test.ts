@@ -2,6 +2,14 @@ import { describe, expect, it } from "vitest";
 import { readRoute, routeUrl, writeRoute } from "./route";
 
 describe("route state", () => {
+  it("opens legacy selected deep links in detail and preserves an explicit Back-to-list state", () => {
+    const state = readRoute(new URLSearchParams("day=2026-10-04&id=old&kind=event"));
+    expect(state.pane).toBe("detail");
+    const returned = readRoute(new URLSearchParams(writeRoute({ ...state, pane: "list" })));
+    expect(returned.pane).toBe("list");
+    expect(returned.selectedId).toBe("old");
+    expect(readRoute(new URLSearchParams("groups=1&kind=group&id=saved")).selectedKind).toBe("group");
+  });
   it("maps allowlisted deep links and canonicalizes later navigation", () => {
     expect(readRoute(new URLSearchParams(), "/ui-v2/context").view).toBe("context");
     expect(readRoute(new URLSearchParams("view=review"), "/ui-v2/context").view).toBe("review");

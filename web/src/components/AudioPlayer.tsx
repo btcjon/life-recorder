@@ -4,7 +4,7 @@ import { isAbortError, type ApiClient } from "../api/client";
 import {
   audioIdentity,
   initialPlaybackState,
-  nowPlayingLabel,
+  playbackCaption,
   reducePlayback,
   type PlaybackResult,
   type PlayableItem,
@@ -18,7 +18,7 @@ export type AudioPlayerHandle = {
 
 export type PlayRequest = {
   nonce: number;
-  span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean };
+  span?: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean } | null;
 };
 
 type AudioPlayerProps = {
@@ -26,9 +26,10 @@ type AudioPlayerProps = {
   client: ApiClient;
   onKeep?: (id: string) => void | Promise<void>;
   playRequest?: PlayRequest | null;
+  selection?: { key: string; label: string } | null;
 };
 
-export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({ item, client, onKeep, playRequest }, ref) {
+export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({ item, client, onKeep, playRequest, selection }, ref) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const stateRef = useRef(initialPlaybackState());
   const abortRef = useRef<AbortController | null>(null);
@@ -97,10 +98,11 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
   }
 
   useEffect(() => {
-    commit(reducePlayback(stateRef.current, { type: "select", item }));
+    const current = item?.preferredSource ? { ...stateRef.current, source: item.preferredSource } : stateRef.current;
+    commit(reducePlayback(current, { type: "select", item }));
     // Selection identity only. Source changes stay on the user buttons.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [item?.id, item?.kind, item?.audioPlayable, item?.enhancedPlayable, item?.label]);
+  }, [item?.id, item?.kind, item?.audioPlayable, item?.enhancedPlayable, item?.label, item?.preferredSource, playRequest?.nonce]);
 
   useEffect(() => {
     return () => {
@@ -169,23 +171,38 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
 
   useEffect(() => {
     if (!playRequest) return;
-    queueSpan(playRequest.span);
-    // Runs after selection so a review play can wait for the new source.
+    if (playRequest.span) {
+      queueSpan(playRequest.span);
+      return;
+    }
+    commit(reducePlayback(stateRef.current, { type: "clearSpan" }));
+    const audio = audioRef.current;
+    const selected = stateRef.current.item;
+    const id = selected ? audioIdentity(selected, stateRef.current.source) : null;
+    if (!audio || !id) return;
+    fullIntent.current = { id, generation: stateRef.current.generation };
+    if (audio.src && audio.readyState >= 1) playFullWhenReady();
+    else audio.addEventListener("loadedmetadata", playFullWhenReady, { once: true });
+    // Runs after the item effect so an explicit play can wait for the new source.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playRequest?.nonce]);
 
   const showSource = view.item?.kind === "event";
   const canEnhanced = !!view.item?.enhancedPlayable;
-  const label = nowPlayingLabel(view.item, view.error);
+  const captionItem = view.item?.kind === "event" ? { ...view.item, label: (view.source === "enhanced" ? "Enhanced · " : "Speech-only · ") + view.item.label } : view.item;
+  const caption = playbackCaption(captionItem, view.error, selection ?? null);
 
   return (
-    <footer className="border-t bg-sidebar px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]" aria-label="Playback">
-      <div className="flex flex-col gap-3 md:grid md:grid-cols-[minmax(160px,0.8fr)_minmax(220px,1.4fr)_auto_auto] md:items-center">
-        <p className="truncate text-sm font-medium" aria-live="polite">{label}</p>
+    <footer className="min-w-0 overflow-x-hidden border-t bg-background px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" aria-label="Playback">
+      <div className="flex min-w-0 flex-col gap-2 md:grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_auto_auto] md:items-center">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium" aria-live="polite">{caption.primary}</p>
+          {caption.secondary ? <p className="truncate text-xs text-muted-foreground">{caption.secondary}</p> : null}
+        </div>
         <audio
           ref={audioRef}
           controls
-          className="w-full"
+          className="w-full max-w-full"
           preload="none"
           onTimeUpdate={() => {
             const audio = audioRef.current;

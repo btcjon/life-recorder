@@ -67,16 +67,31 @@ export type DisplayBlock = {
   start_chunk_id?: string;
   end_chunk_id?: string;
   revision?: number;
+  day_portion?: boolean;
+  clip_count?: number;
+};
+
+export type SpeechEventChunk = {
+  id?: string;
+  chunk_id?: string;
+  start?: number;
+  end?: number;
+  clip_started?: string | null;
 };
 
 export type SpeechEvent = {
   id: string;
   audio_playable?: boolean;
   enhanced_playable?: boolean;
+  started?: string;
   started_local?: string;
+  ended?: string;
+  ended_local?: string;
   playable_duration?: number;
   duration?: number;
-  chunks?: Array<{ id?: string }>;
+  source?: string;
+  enhancement_status?: string;
+  chunks?: SpeechEventChunk[];
 };
 
 export type Person = {
@@ -102,6 +117,7 @@ export type CaptureSession = {
 };
 
 export type DayPayload = {
+  day?: string;
   chunks?: Chunk[];
   display_blocks?: DisplayBlock[];
   events?: SpeechEvent[];

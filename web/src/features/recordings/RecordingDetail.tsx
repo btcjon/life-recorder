@@ -4,68 +4,302 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useEffect, useRef, useState } from "react";
-import { ApiError, labelFailureCopy, retryFailureCopy, type ApiClient } from "../../api/client";
-import type { Chunk, DayPayload, IdentityMutationResult, Person, SpeechEvent } from "../../api/types";
+import { ApiError, eventEditFailureCopy, labelFailureCopy, retryFailureCopy, type ApiClient } from "../../api/client";
+import type { Chunk, DayPayload, DisplayBlock, IdentityMutationResult, Person, SpeechEvent } from "../../api/types";
 import { audioIdentity, type PlayableItem } from "../../lib/playback";
 import {
+  audioRetentionLabel,
   briefDisclosureLabel,
   briefStretch,
   cleanSeconds,
-  formatTime,
+  derivedScopeCopy,
+  eventRange,
+  eventSources,
+  eventTimeRange,
   groupBounds,
   groupLabel,
-  groupTranscript,
   groupTurns,
+  highlightSegments,
   processingBits,
+  relatedEvents,
+  speakerPendingLabel,
+  toPlayableChunk,
+  toPlayableEvent,
+  transcriptState,
   type TurnGroup,
 } from "../../lib/recordings";
 import { fullyNamed, groupLabelBody } from "../../lib/identity";
 import { CREATE_ASSIGN_NOTICE, UNKNOWN_OUTCOME, enrollmentFailure, isUnknownSaveOutcome } from "../identitySafety";
+
+type SpanRequest = { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean };
 
 type DetailProps = {
   payload: DayPayload | null;
   loading: boolean;
   chunk: Chunk | null;
   event: SpeechEvent | null;
+  group?: { block: DisplayBlock; members: Chunk[] } | null;
+  query?: string;
   detailMode: "transcript" | "turns";
   onDetailMode: (mode: "transcript" | "turns") => void;
   client: ApiClient;
   playerItem: PlayableItem | null;
-  onPlaySpan: (span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean }) => void;
+  onPlaySpan: (span: SpanRequest) => void;
   onPlayFull: () => void;
+  onPlayItem?: (item: PlayableItem, span?: SpanRequest | null) => void;
+  onOpenSource?: (id: string, started?: string) => void;
   reviewNotice?: string;
   onReload: () => Promise<boolean> | boolean | void;
   onPeople: (person: Person) => void;
   onIdentityChange?: (changeId: string | null) => void;
+  readOnly?: boolean;
 };
 
 export function RecordingDetail(props: DetailProps) {
   if (props.loading && !props.payload) {
     return <div className="grid gap-3 p-6"><Skeleton className="h-8 w-48" /><Skeleton className="h-24 w-full" /></div>;
   }
-  if (props.event) return <EventDetail event={props.event} />;
+  if (props.group) {
+    return <GroupDetail {...props} group={props.group} />;
+  }
+  if (props.event) {
+    return <EventContext {...props} event={props.event} />;
+  }
   if (!props.chunk) {
     return <p className="p-6 text-sm text-muted-foreground">Select a recording.</p>;
   }
   return <ChunkDetail {...props} chunk={props.chunk} />;
 }
 
-function EventDetail({ event }: { event: SpeechEvent }) {
+function HighlightedTranscript({ text, query, label }: { text: string; query: string; label?: string }) {
+  const ref = useRef<HTMLParagraphElement>(null);
+  const segments = highlightSegments(text, query);
+  const hasMatch = segments.some((part) => part.match);
+  useEffect(() => {
+    if (!hasMatch) return;
+    ref.current?.querySelector("mark")?.scrollIntoView({ block: "nearest" });
+  }, [hasMatch, text, query]);
   return (
-    <article className="grid max-w-3xl gap-3 p-4 md:p-8">
-      <h2 className="text-2xl font-semibold tracking-tight">{event.started_local || "Speech event"}</h2>
-      <p className="text-sm text-muted-foreground">{Number(event.playable_duration || event.duration || 0).toFixed(1)} seconds playable</p>
-      <p>This is a derived speech event. Use the player below to hear it, or choose Original or Enhanced.</p>
-      <p className="text-sm text-muted-foreground">{(event.chunks || []).length} source recording{(event.chunks || []).length === 1 ? "" : "s"} · Full transcripts and speaker assignment are available from the source recordings.</p>
+    <p ref={ref} className="transcript max-w-3xl leading-relaxed" aria-label={label}>
+      {segments.length ? segments.map((part, index) => part.match
+        ? <mark key={index} className="rounded-sm bg-primary/20 text-inherit">{part.text}</mark>
+        : <span key={index}>{part.text}</span>) : "No transcript text."}
+    </p>
+  );
+}
+
+function AudioOptions({
+  events,
+  chunks,
+  onPlayItem,
+  onOpenSource,
+}: {
+  events: SpeechEvent[];
+  chunks: Chunk[];
+  onPlayItem?: (item: PlayableItem, span?: SpanRequest | null) => void;
+  onOpenSource?: (id: string, started?: string) => void;
+}) {
+  if (!events.length) return null;
+  return (
+    <details aria-label="Audio options" className="max-w-3xl rounded-xl border p-3">
+      <summary className="touch-target cursor-pointer text-sm font-medium">Audio options · {events.length} speech {events.length === 1 ? "clip" : "clips"}</summary>
+      <div className="grid gap-3 pt-2">
+      <p className="text-xs text-muted-foreground">Speech clips skip silence and use their own clock. The source recording is unchanged.</p>
+      {events.map((event) => {
+        const sources = eventSources(event, chunks);
+        const item: PlayableItem = toPlayableEvent(event);
+        item.label = eventTimeRange(event);
+        item.preferredSource = "original";
+        return (
+          <div key={event.id} className="grid gap-2 border-t pt-2">
+            <p className="text-sm">{eventTimeRange(event)}</p>
+            <p className="text-sm text-muted-foreground">{derivedScopeCopy(sources.length)}</p>
+            <ul className="grid gap-1" aria-label="Included source recordings">
+              {sources.map((source) => (
+                <li key={source.id}>
+                  <button type="button" disabled={!source.present && !source.started} className="touch-target text-left text-sm underline disabled:no-underline disabled:text-muted-foreground" onClick={() => onOpenSource?.(source.id, source.started)}>
+                    {source.label}{source.present ? "" : " · not in this day"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" className="touch-target" disabled={!event.audio_playable || !onPlayItem} onClick={() => onPlayItem?.(item, null)}>Play speech-only</Button>
+              <Button type="button" size="sm" variant="outline" className="touch-target" disabled={!event.enhanced_playable || !onPlayItem} onClick={() => onPlayItem?.({ ...item, preferredSource: "enhanced" }, null)}>Play enhanced</Button>
+            </div>
+          </div>
+        );
+      })}
+      </div>
+    </details>
+  );
+}
+
+function SourceTranscripts({
+  members,
+  query,
+  onPlayItem,
+  onOpenSource,
+}: {
+  members: Chunk[];
+  query: string;
+  onPlayItem?: (item: PlayableItem, span?: SpanRequest | null) => void;
+  onOpenSource?: (id: string) => void;
+}) {
+  return (
+    <div className="grid max-w-3xl gap-4">
+      {members.map((chunk) => (
+        <section key={chunk.id} className="grid gap-2 border-t pt-3" aria-label={chunk.started_local || "Source recording"}>
+          <h3 className="text-base font-medium">{chunk.started_local || chunk.started || "Recording"}</h3>
+          <p className="text-xs text-muted-foreground">{Number(chunk.duration || 0).toFixed(0)} seconds · source boundary</p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className="touch-target" disabled={!toPlayableChunk(chunk).audioPlayable} onClick={() => onPlayItem?.(toPlayableChunk(chunk), null)}>Play recording</Button>
+            <Button type="button" size="sm" variant="outline" className="touch-target" onClick={() => onOpenSource?.(chunk.id)}>Speaker naming</Button>
+          </div>
+          {transcriptState(chunk) ? <p role="status" className="text-sm">{transcriptState(chunk)}</p> : null}
+          {audioRetentionLabel(chunk) ? <p role="status" className="text-sm">Audio no longer retained</p> : null}
+          <HighlightedTranscript text={chunk.transcript || ""} query={query} />
+        </section>
+      ))}
+    </div>
+  );
+}
+
+function EventContext({ event, payload, query = "", onPlayItem, onOpenSource }: DetailProps & { event: SpeechEvent }) {
+  const chunks = payload?.chunks || [];
+  const sources = eventSources(event, chunks);
+  const members = sources.map((source) => chunks.find((chunk) => chunk.id === source.id)).filter((chunk): chunk is Chunk => !!chunk);
+  return (
+    <article className="h-full min-w-0 overflow-y-auto p-4 pb-8 [overflow-wrap:anywhere] md:p-8" tabIndex={-1}>
+      <div className="grid min-w-0 max-w-3xl gap-4">
+        <header>
+          <h2 className="text-xl font-semibold tracking-tight">Speech-only clip</h2>
+          <p className="text-sm text-muted-foreground">{eventTimeRange(event)}</p>
+        </header>
+        <p className="text-sm">{derivedScopeCopy(sources.length)}</p>
+        <AudioOptions events={[event]} chunks={chunks} onPlayItem={onPlayItem} onOpenSource={onOpenSource} />
+        {members.length ? <SourceTranscripts members={members} query={query} onPlayItem={onPlayItem} onOpenSource={onOpenSource} /> : <p className="text-sm text-muted-foreground">Source transcripts for this clip are not in the loaded day.</p>}
+      </div>
     </article>
   );
 }
 
-function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerItem, onPlaySpan, onPlayFull, onReload, onPeople, onIdentityChange, reviewNotice }: DetailProps & { chunk: Chunk }) {
+function GroupDetail({ group, payload, query = "", client, onPlayItem, onOpenSource, onReload, readOnly }: DetailProps & { group: { block: DisplayBlock; members: Chunk[] } }) {
+  const saved = group.block.source === "manual";
+  return (
+    <article id="recording-detail" className="h-full min-w-0 overflow-y-auto p-4 pb-8 [overflow-wrap:anywhere] md:p-8" tabIndex={-1}>
+      <div className="grid min-w-0 max-w-3xl gap-4">
+        <header>
+          <h2 className="text-xl font-semibold tracking-tight">{saved && group.block.title ? group.block.title : saved ? "Saved group" : "Suggested group"}</h2>
+          <p className="text-sm text-muted-foreground">{saved ? "Saved group" : "Suggested group, not an established conversation"} · {eventRange(group.block)}</p>
+          {group.block.day_portion ? <p className="text-xs text-muted-foreground">This day shows part of the saved boundaries.</p> : null}
+        </header>
+        {group.block.summary_state === "ready" && group.block.summary ? <p className="text-sm">{group.block.summary}</p> : null}
+        <BoundaryEditor block={group.block} payload={payload} client={client} onReload={onReload} readOnly={readOnly} />
+        <SourceTranscripts members={group.members} query={query} onPlayItem={onPlayItem} onOpenSource={onOpenSource} />
+      </div>
+    </article>
+  );
+}
+
+function BoundaryEditor({
+  block,
+  payload,
+  client,
+  onReload,
+  readOnly,
+}: {
+  block: DisplayBlock;
+  payload: DayPayload | null;
+  client: ApiClient;
+  onReload: () => Promise<boolean> | boolean | void;
+  readOnly?: boolean;
+}) {
+  const manual = block.source === "manual";
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(manual ? block.title || "" : "");
+  const [start, setStart] = useState(block.start_chunk_id || "");
+  const [end, setEnd] = useState(block.end_chunk_id || "");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [conflict, setConflict] = useState(false);
+  const writeBusy = useRef(false);
+  const options = (payload?.chunks || []).filter((chunk) => chunk.started_local || chunk.started);
+  useEffect(() => {
+    setTitle(manual ? block.title || "" : "");
+    setStart(block.start_chunk_id || "");
+    setEnd(block.end_chunk_id || "");
+    setError("");
+    setConflict(false);
+    setSaving(false);
+    setOpen(false);
+  }, [block.id, block.revision, block.title, block.start_chunk_id, block.end_chunk_id, manual]);
+
+  async function save() {
+    if (readOnly || writeBusy.current || conflict || saving) return;
+    if (!start || !end || !title.trim()) {
+      setError("Enter a title and both recording boundaries.");
+      return;
+    }
+    writeBusy.current = true;
+    setSaving(true);
+    setError("");
+    const body: Record<string, unknown> = {
+      title,
+      start_chunk_id: start,
+      end_chunk_id: end,
+      expected_revision: manual ? Number(block.revision || 0) : 0,
+    };
+    if (manual && block.id) body.id = block.id;
+    try {
+      await client.saveEventEdit(body);
+      setOpen(false);
+      await onReload();
+    } catch (caught) {
+      const uncertain = isUnknownSaveOutcome(caught);
+      setConflict(uncertain || caught instanceof ApiError && caught.status === 409);
+      setError(uncertain ? "The save outcome is uncertain. Reload current boundaries before another save; nothing was retried." : eventEditFailureCopy(caught));
+    } finally {
+      writeBusy.current = false;
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="grid gap-2" aria-label="Group boundaries">
+      <p className="text-xs text-muted-foreground">Boundaries stay on the saved recordings. This does not create a combined playback.</p>
+      <Button type="button" size="sm" variant="outline" className="touch-target w-fit" disabled={readOnly || saving || conflict} aria-label={manual ? "Edit event title and boundaries" : "Edit this suggested event"} onClick={() => setOpen((value) => !value)}>
+        {open ? "Close" : "Edit title and boundaries"}
+      </Button>
+      {open ? (
+        <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); void save(); }}>
+          <label className="grid gap-1 text-xs text-muted-foreground">Title
+            <Input aria-label="Event title" maxLength={80} value={title} onChange={(event) => setTitle(event.target.value)} />
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">Starts with
+            <select aria-label="Starts with" className="h-8 max-w-full rounded-lg border bg-transparent px-2" value={start} onChange={(event) => setStart(event.target.value)}>
+              <option value="">Choose a recording</option>
+              {options.map((chunk) => <option key={chunk.id} value={chunk.id}>{chunk.started_local || chunk.started || "Recording"}</option>)}
+            </select>
+          </label>
+          <label className="grid gap-1 text-xs text-muted-foreground">Ends with
+            <select aria-label="Ends with" className="h-8 max-w-full rounded-lg border bg-transparent px-2" value={end} onChange={(event) => setEnd(event.target.value)}>
+              <option value="">Choose a recording</option>
+              {options.map((chunk) => <option key={chunk.id} value={chunk.id}>{chunk.started_local || chunk.started || "Recording"}</option>)}
+            </select>
+          </label>
+          <Button type="submit" size="sm" className="touch-target w-fit" disabled={readOnly || saving || conflict}>{saving ? "Saving" : "Save"}</Button>
+          {error ? <p role="alert" className="text-xs text-destructive">{error}</p> : null}
+          {conflict ? <Button type="button" variant="outline" disabled={readOnly || saving} onClick={async () => { const ok = await onReload(); if (ok === true) setConflict(false); }}>Reload current boundaries</Button> : null}
+        </form>
+      ) : null}
+    </section>
+  );
+}
+
+function ChunkDetail({ chunk, payload, detailMode, client, onPlaySpan, onPlayFull, onPlayItem, onOpenSource, onReload, onPeople, onIdentityChange, reviewNotice, query = "", readOnly }: DetailProps & { chunk: Chunk }) {
   const [notice, setNotice] = useState("Mac processing stopped after repeated failures. The original recording is kept if available.");
   const [retrying, setRetrying] = useState(false);
   const [retryBlocked, setRetryBlocked] = useState(false);
@@ -102,16 +336,29 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
     pendingRef.current = false;
     setPending(false);
   }, [chunk.id]);
+  useEffect(() => {
+    if (detailMode === "turns") document.getElementById("speaker-controls")?.focus();
+  }, [detailMode, chunk.id]);
   const groups = Array.isArray(chunk.speakers) ? groupTurns(chunk) : [];
   const brief = groups.filter(briefStretch);
   const [briefOpen, setBriefOpen] = useState<boolean | null>(null);
   const briefExpanded = briefOpen ?? (brief.length === groups.length || brief.some((group) => group.key === openKey));
-  const expectedId = playerItem ? audioIdentity(playerItem, "original") : null;
+  const playerItem = toPlayableChunk(chunk);
+  const expectedId = audioIdentity(playerItem, "original");
+  const stateLabel = transcriptState(chunk);
+  const events = relatedEvents(payload, chunk.id);
+
+  function playRecording() {
+    if (onPlayItem) onPlayItem(playerItem, null);
+    else onPlayFull();
+  }
 
   function playGroup(group: TurnGroup, fromStart: boolean) {
-    if (!chunk.audio_playable || !expectedId) return;
+    if (!playerItem.audioPlayable || !expectedId) return;
     const bounds = groupBounds(group);
-    onPlaySpan({ key: group.key, start: bounds.start, end: bounds.end, expectedAudioId: expectedId, fromStart });
+    const span = { key: group.key, start: bounds.start, end: bounds.end, expectedAudioId: expectedId, fromStart };
+    if (onPlayItem) onPlayItem(playerItem, span);
+    else onPlaySpan(span);
   }
 
   function lockIdentity(message: string) {
@@ -121,7 +368,7 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
   }
 
   function claim(): boolean {
-    if (pendingRef.current || conflictRef.current) return false;
+    if (readOnly || pendingRef.current || conflictRef.current) return false;
     pendingRef.current = true;
     setPending(true);
     return true;
@@ -190,13 +437,21 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
     }
   }
 
+  function openName(group: TurnGroup, trigger: HTMLButtonElement) {
+    returnFocus.current = trigger;
+    setUseSample(false);
+    setIdentityError("");
+    setOpenKey(group.key);
+  }
+
   return (
     <article id="recording-detail" className="h-full min-w-0 overflow-y-auto p-4 pb-8 [overflow-wrap:anywhere] md:p-8" tabIndex={-1}>
       <div className="grid min-w-0 max-w-3xl gap-4">
         <header>
-          <h2 className="text-2xl font-semibold tracking-tight">{chunk.started_local || "Recording"}</h2>
+          <h2 className="text-xl font-semibold tracking-tight">{chunk.started_local || "Recording"}</h2>
           <p className="text-sm text-muted-foreground">{Number(chunk.duration || 0).toFixed(1)} seconds</p>
         </header>
+        <Button type="button" className="touch-target w-fit" disabled={!playerItem.audioPlayable} onClick={playRecording}>Play recording</Button>
         {identityNotice && <p role="status" className="text-sm">{identityNotice}</p>}
         {reviewNotice ? (
           <Alert>
@@ -206,10 +461,10 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
         ) : null}
         {chunk.status === "needs_attention" ? (
           <Alert variant="destructive">
-            <AlertTitle>Processing needs attention</AlertTitle>
+            <AlertTitle>Transcript processing needs attention</AlertTitle>
             <AlertDescription>{originalUnavailable ? "Original audio is unavailable; this recording cannot be retried." : notice}</AlertDescription>
-            <Button type="button" className="touch-target mt-2" disabled={retrying || retryBlocked || originalUnavailable} onClick={async () => {
-              if (retryRef.current || retryBlocked || chunk.audio_playable === false) return;
+            <Button type="button" className="touch-target mt-2" disabled={readOnly || retrying || retryBlocked || originalUnavailable} onClick={async () => {
+              if (readOnly || retryRef.current || retryBlocked || chunk.audio_playable === false) return;
               retryRef.current = true;
               setRetrying(true);
               try {
@@ -225,62 +480,32 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
               }
             }}>Retry processing</Button>
           </Alert>
-        ) : null}
-        <div className="flex flex-wrap gap-2">
-          <Tabs value={detailMode} onValueChange={(value) => onDetailMode(value === "turns" ? "turns" : "transcript")}>
-            <TabsList>
-              <TabsTrigger value="transcript">Transcript</TabsTrigger>
-              <TabsTrigger value="turns">Speaker turns</TabsTrigger>
-            </TabsList>
-          </Tabs>
-          <Button type="button" variant="outline" className="touch-target" disabled={!chunk.audio_playable} onClick={onPlayFull}>Play full recording</Button>
-        </div>
-        {!Array.isArray(chunk.speakers) ? (
-          <>
-            <p className="text-sm text-muted-foreground">{chunk.status === "complete" ? "Loading speakers…" : "Speaker analysis has not finished."}</p>
-            <p className="transcript">{chunk.transcript || "No transcript yet."}</p>
-          </>
-        ) : detailMode === "transcript" ? (
-          <>
-            <div className="flex flex-wrap gap-2" aria-label="Speakers">
+        ) : stateLabel ? <p role="status" className="text-sm">{stateLabel}</p> : null}
+        {audioRetentionLabel(chunk) ? <p role="status" className="text-sm">Audio no longer retained</p> : null}
+        {(speakerPendingLabel(chunk) || (!Array.isArray(chunk.speakers) && chunk.status === "complete")) ? <p role="status" className="text-sm">Speaker analysis pending</p> : null}
+        <HighlightedTranscript text={chunk.transcript || ""} query={query} label="Transcript" />
+        <div id="speaker-controls" tabIndex={-1} className="grid gap-2 outline-none" aria-label="Speakers">
+          <h3 className="text-sm font-medium">Speakers</h3>
+          {Array.isArray(chunk.speakers) ? (
+            <>
               {!groups.length ? <Badge variant="outline">Unknown · No speaker turns available</Badge> : null}
               {groups.filter((group) => !briefStretch(group)).map((group) => (
-                <SpeakerPill key={group.key} group={group} open={openKey === group.key} onOpen={(trigger) => { returnFocus.current = trigger; playGroup(group, true); setUseSample(false); setIdentityError(""); setOpenKey(group.key); }} />
+                <SpeakerRow key={group.key} group={group} open={openKey === group.key} audio={playerItem.audioPlayable} onName={openName} onPlay={() => playGroup(group, true)} />
               ))}
               {brief.length ? (
                 <details className="w-full" open={briefExpanded} onToggle={(event) => setBriefOpen(event.currentTarget.open)}>
                   <summary className="cursor-pointer text-sm text-muted-foreground">{briefDisclosureLabel(brief.length)}</summary>
-                  <div className="mt-2 flex flex-wrap gap-2">
+                  <div className="mt-2 grid gap-2">
                     {brief.map((group) => (
-                      <SpeakerPill key={group.key} group={group} open={openKey === group.key} onOpen={(trigger) => { returnFocus.current = trigger; playGroup(group, true); setUseSample(false); setIdentityError(""); setOpenKey(group.key); }} />
+                      <SpeakerRow key={group.key} group={group} open={openKey === group.key} audio={playerItem.audioPlayable} onName={openName} onPlay={() => playGroup(group, true)} />
                     ))}
                   </div>
                 </details>
               ) : null}
-            </div>
-            <p className="transcript">{chunk.transcript || "No transcript yet."}</p>
-          </>
-        ) : (
-          <div className="grid gap-3">
-            {!groups.length ? <p>No speaker turns for this recording.</p> : null}
-            {groups.map((group) => {
-              const bounds = groupBounds(group);
-              return (
-                <section key={group.key} className="rounded-xl border p-3">
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <SpeakerPill group={group} open={openKey === group.key} onOpen={(trigger) => { returnFocus.current = trigger; playGroup(group, true); setUseSample(false); setIdentityError(""); setOpenKey(group.key); }} />
-                    <div className="flex gap-2">
-                      <Button type="button" size="sm" className="touch-target" disabled={!chunk.audio_playable} aria-label="Play this speaker clip" onClick={() => playGroup(group, false)}>Play</Button>
-                      <Button type="button" size="sm" variant="outline" className="touch-target" disabled={!chunk.audio_playable} aria-label="Replay this speaker clip" onClick={() => playGroup(group, true)}>Replay</Button>
-                    </div>
-                  </div>
-                  <SpanMeter groupKey={group.key} start={bounds.start} end={bounds.end} />
-                  <p className="transcript mt-2 border-l-2 pl-3">{groupTranscript(group) || "No transcript for this clip."}</p>
-                </section>
-              );
-            })}
-          </div>
-        )}
+            </>
+          ) : <p className="text-sm text-muted-foreground">Speaker names appear here when analysis is ready.</p>}
+        </div>
+        <AudioOptions events={events} chunks={payload?.chunks || []} onPlayItem={onPlayItem} onOpenSource={onOpenSource} />
         <details className="text-sm">
           <summary className="cursor-pointer text-muted-foreground">Processing details</summary>
           <p className="mt-2 text-muted-foreground">{processingBits(chunk)}</p>
@@ -299,7 +524,7 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
         onUseSample={setUseSample}
         onNewName={setNewName}
         onCreating={setCreating}
-        blocked={identityConflict}
+        blocked={identityConflict || readOnly}
         onClose={() => { if (!pendingRef.current) setOpenKey(null); }}
         onLabel={label}
         onCreate={async (group, name) => {
@@ -356,38 +581,18 @@ function ChunkDetail({ chunk, payload, detailMode, onDetailMode, client, playerI
   );
 }
 
-function SpanMeter({ groupKey, start, end }: { groupKey: string; start: number; end: number }) {
-  const [elapsed, setElapsed] = useState(0);
-  const duration = Math.max(0, end - start);
-  useEffect(() => {
-    const onTick = (event: Event) => {
-      const detail = (event as CustomEvent<{ time: number; clipKey: string | null; clipStart: number | null }>).detail;
-      if (!detail || detail.clipKey !== groupKey || detail.clipStart == null) {
-        setElapsed(0);
-        return;
-      }
-      setElapsed(Math.max(0, Math.min(duration, detail.time - detail.clipStart)));
-    };
-    window.addEventListener("life-recorder-tick", onTick);
-    return () => window.removeEventListener("life-recorder-tick", onTick);
-  }, [duration, groupKey]);
-  return (
-    <div className="mt-2 flex items-center gap-2">
-      <Progress value={duration ? (elapsed / duration) * 100 : 0} aria-label="Speaker clip progress" className="flex-1" />
-      <span className="text-xs text-muted-foreground tabular-nums">{formatTime(elapsed)} / {formatTime(duration)}</span>
-    </div>
-  );
-}
-
-function SpeakerPill({ group, open, onOpen }: { group: TurnGroup; open: boolean; onOpen: (trigger: HTMLButtonElement) => void }) {
+function SpeakerRow({ group, open, audio, onName, onPlay }: { group: TurnGroup; open: boolean; audio: boolean; onName: (group: TurnGroup, trigger: HTMLButtonElement) => void; onPlay: () => void }) {
   const info = groupLabel(group);
   const bounds = groupBounds(group);
   const start = Number.isFinite(bounds.start) ? bounds.start.toFixed(1) : "?";
   const end = Number.isFinite(bounds.end) ? bounds.end.toFixed(1) : "?";
   return (
-    <Button type="button" size="sm" className="touch-target h-auto max-w-full whitespace-normal break-words text-left" variant={info.tone === "suggested" ? "outline" : "secondary"} aria-expanded={open} aria-haspopup="dialog" aria-label={"Play " + start + " to " + end + " seconds"} onClick={(event) => onOpen(event.currentTarget)}>
-      {info.label + " · " + start + "–" + end + "s"}
-    </Button>
+    <div className="flex min-w-0 flex-wrap items-center gap-2">
+      <Button type="button" size="sm" className="wrapping-control touch-target h-auto max-w-full whitespace-normal break-words text-left" variant={info.tone === "suggested" ? "outline" : "secondary"} aria-expanded={open} aria-haspopup="dialog" aria-label={"Name speaker, " + start + " to " + end + " seconds"} onClick={(event) => onName(group, event.currentTarget)}>
+        {info.label + " · " + start + "–" + end + "s"}
+      </Button>
+      <Button type="button" size="sm" variant="outline" className="touch-target" disabled={!audio} aria-label={"Play speaker, " + start + " to " + end + " seconds"} onClick={onPlay}>Play</Button>
+    </div>
   );
 }
 
@@ -442,7 +647,7 @@ function IdentityDialog({
         {group ? (
           <div className="grid gap-3">
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={sample} disabled={!ready || pending || blocked} aria-label="Save a voice sample" onCheckedChange={(checked) => onUseSample(ready && checked === true)} />
+              <Checkbox checked={sample} disabled={!ready || pending || blocked} onCheckedChange={(checked) => onUseSample(ready && checked === true)} />
               Save a voice sample
             </label>
             <p className="text-xs text-muted-foreground">
@@ -452,6 +657,7 @@ function IdentityDialog({
                   : "Leave this unchecked to name the stretch without saving a voice sample."
                 : "This piece is under 5 seconds of one clean voice, so it can be named but not saved as a voice sample."}
             </p>
+            {!people.length ? <p className="text-sm">No people yet. Create a person here to name this stretch. This does not restore names from older recordings.</p> : null}
             {creating ? (
               <form className="grid gap-2" onSubmit={(event) => { event.preventDefault(); if (!pending && !blocked && newName.trim()) void onCreate(group, newName.trim()); }}>
                 <Input aria-label="New person name" disabled={pending || blocked} value={newName} placeholder="Name" onChange={(event) => onNewName(event.target.value)} />
@@ -463,7 +669,7 @@ function IdentityDialog({
             ) : (
               <div className="grid gap-1">
                 {people.map((person) => (
-                  <Button key={person.id} type="button" variant="outline" className="touch-target justify-start whitespace-normal break-words" disabled={blocked || pending} onClick={() => void onLabel(group, person.id, sample)}>{person.name}</Button>
+                  <Button key={person.id} type="button" variant="outline" className="wrapping-control touch-target justify-start whitespace-normal break-words" disabled={blocked || pending} onClick={() => void onLabel(group, person.id, sample)}>{person.name}</Button>
                 ))}
                 <Button type="button" variant="ghost" className="touch-target justify-start" disabled={blocked || pending} onClick={() => onCreating(true)}>New person</Button>
                 {group.turns.some((turn) => turn.person_id) ? (

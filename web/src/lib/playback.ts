@@ -7,6 +7,7 @@ export type PlayableItem = {
   enhancedPlayable: boolean;
   label: string;
   pinned: boolean;
+  preferredSource?: AudioSource;
 };
 
 export type PlaybackState = {
@@ -187,6 +188,21 @@ export function reducePlayback(
 
 export function nowPlayingLabel(item: PlayableItem | null, error: string | null): string {
   if (error) return error;
-  if (!item) return "No recording selected";
+  if (!item) return "Nothing playing";
   return item.label + (item.audioPlayable ? "" : " · audio unavailable");
+}
+
+export function playbackCaption(
+  item: PlayableItem | null,
+  error: string | null,
+  selection: { key: string; label: string } | null,
+): { primary: string; secondary: string } {
+  const playing = nowPlayingLabel(item, error);
+  const playingKey = item ? item.kind + ":" + item.id : "";
+  const differs = !!selection && selection.key !== playingKey;
+  if (!differs) return { primary: item ? playing : "Nothing playing", secondary: "" };
+  return {
+    primary: item ? "Now playing: " + playing : "Nothing playing",
+    secondary: "Selected: " + selection.label,
+  };
 }

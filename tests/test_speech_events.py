@@ -145,6 +145,29 @@ class EventAssemblyTests(unittest.TestCase):
 
 
 class PersistenceAndPlaybackTests(unittest.TestCase):
+    def test_human_day_preserves_cross_day_source_times_and_offsets(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            inbox = Inbox(Path(scratch))
+            device = str(uuid.uuid4())
+            first, second = str(uuid.uuid4()), str(uuid.uuid4())
+            starts = ["2026-10-04T03:59:00.000Z", "2026-10-04T04:00:00.000Z"]
+            for chunk_id, started in zip((first, second), starts):
+                dest = inbox.audio / (chunk_id + ".m4a")
+                dest.write_bytes(b"synthetic")
+                with inbox.connect() as db:
+                    db.execute("""INSERT INTO chunks
+                        (id,sha256,device,started,duration,path,received,status,audio_state)
+                        VALUES (?,?,?,?,?,?,?,?,?)""",
+                        (chunk_id, "a"*64, device, started, 60, str(dest), 0, "complete", "present"))
+            vad_mod.save_chunk_spans(inbox, first, [{"start": 58, "end": 60}])
+            vad_mod.save_chunk_spans(inbox, second, [{"start": 0, "end": 2}])
+            vad_mod.rebuild_events(inbox)
+            for day in ("2026-10-03", "2026-10-04"):
+                event = inbox.viewer_day(day)["events"][0]
+                self.assertEqual([part["clip_started"] for part in event["chunks"]], starts)
+                self.assertEqual([part["chunk_id"] for part in event["chunks"]], [first, second])
+                self.assertEqual([(part["start"], part["end"]) for part in event["chunks"]], [(58, 60), (0, 2)])
+
     def test_schema_v5_and_event_roundtrip(self):
         with tempfile.TemporaryDirectory() as scratch:
             inbox = Inbox(Path(scratch))
@@ -183,6 +206,11 @@ class PersistenceAndPlaybackTests(unittest.TestCase):
             event = payload["events"][0]
             self.assertTrue(event["audio_playable"])
             self.assertAlmostEqual(event["playable_duration"], 3.3)
+            self.assertEqual([part["chunk_id"] for part in event["chunks"]], [first, second])
+            self.assertEqual([part["clip_started"] for part in event["chunks"]],
+                             ["2026-09-10T16:00:00.000Z", "2026-09-10T16:00:10.000Z"])
+            self.assertEqual([(part["start"], part["end"]) for part in event["chunks"]],
+                             [(8.0, 9.5), (0.2, 2.0)])
             self.assertFalse(event["enhanced_playable"])
             self.assertEqual(event["enhancement_status"], "pending")
             original = Path(scratch) / "events" / (event["id"] + ".wav")

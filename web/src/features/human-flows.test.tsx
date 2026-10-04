@@ -66,7 +66,7 @@ describe("recordings identity", () => {
         speakers: [{ id: "t", started: 0, ended: 4, speaker_key: "S1", text: "synthetic" }] }} event={null}
       detailMode="turns" onDetailMode={() => undefined} client={client} playerItem={null}
       onPlaySpan={() => undefined} onPlayFull={() => undefined} onReload={() => false} onPeople={() => undefined} />);
-    await user.click(screen.getAllByRole("button", { name: /Play 0.0 to 4.0 seconds/ })[0]);
+    await user.click(screen.getByRole("button", { name: /Name speaker, 0.0 to 4.0 seconds/ }));
     await user.click(await screen.findByRole("button", { name: "Ada" }));
     expect(screen.getByRole("button", { name: "Ada" })).toHaveProperty("disabled", true);
     await user.click(screen.getByRole("button", { name: "Reload before editing" }));
@@ -99,7 +99,7 @@ describe("recordings identity", () => {
         speakers: [{ id: "t", started: 0, ended: 4, speaker_key: "S1", text: "synthetic" }] }} event={null}
       detailMode="turns" onDetailMode={() => undefined} client={client} playerItem={null}
       onPlaySpan={() => undefined} onPlayFull={() => undefined} onReload={reload} onPeople={() => undefined} />);
-    await user.click(screen.getAllByRole("button", { name: /Play 0.0 to 4.0 seconds/ })[0]);
+    await user.click(screen.getByRole("button", { name: /Name speaker, 0.0 to 4.0 seconds/ }));
     await user.click(await screen.findByRole("button", { name: "Ada" }));
     await user.click(screen.getByRole("button", { name: "Reload before editing" }));
     expect(reload).toHaveBeenCalledTimes(1);
@@ -145,7 +145,7 @@ describe("recordings identity", () => {
         onPeople={() => undefined}
       />,
     );
-    await user.click(screen.getAllByRole("button", { name: /Play 0.0 to 4.0 seconds/ })[0]);
+    await user.click(screen.getByRole("button", { name: /Name speaker, 0.0 to 4.0 seconds/ }));
     await user.click(await screen.findByRole("button", { name: "Ada" }));
     expect(posts).toHaveLength(1);
     expect(posts[0]?.url).toBe("/v1/identities/label");
@@ -299,11 +299,13 @@ describe("playback across views", () => {
     const user = userEvent.setup();
     render(<App client={client} />);
     expect(await screen.findByRole("contentinfo", { name: "Playback" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Review" }));
+    await user.click(screen.getByRole("button", { name: "More" }));
+    await user.click(screen.getByRole("menuitem", { name: "Review" }));
     await user.click(screen.getByRole("button", { name: "People" }));
     expect(screen.getAllByRole("contentinfo", { name: "Playback" })).toHaveLength(1);
-    expect(screen.getByRole("button", { name: /Context/ }).textContent).not.toContain("Later");
-    expect(screen.getByRole("button", { name: "Review" }).textContent || "").not.toContain("Later");
+    await user.click(screen.getByRole("button", { name: "More" }));
+    expect(screen.getByRole("menuitem", { name: "Context" }).textContent).not.toContain("Later");
+    expect(screen.getByRole("menuitem", { name: "Review" }).textContent || "").not.toContain("Later");
 
     const played = vi.fn(() => Promise.resolve());
     HTMLMediaElement.prototype.play = played;

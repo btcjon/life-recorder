@@ -229,7 +229,7 @@ export function PeopleView({
         ) : null}
         {notice ? <p className="text-sm" aria-live="polite">{notice}</p> : null}
         {loading && !profiles ? <p className="text-sm text-muted-foreground">Loading people…</p> : null}
-        {!loading && !people.length && !error ? <p>No people yet. Identify a speaker from a recording to add someone.</p> : null}
+        {!loading && !people.length && !error ? <p>No people in this catalog. Open a recording, choose a speaker, and create or assign a name. This does not restore people from older recordings.</p> : null}
         {activeChangeId ? (
           <Button type="button" variant="outline" className="touch-target w-fit" disabled={blocked} onClick={() => ask(
             "Undo latest identity edit",

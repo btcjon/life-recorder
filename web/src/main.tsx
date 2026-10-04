@@ -4,6 +4,7 @@ import { App } from "./App";
 import { bootstrapAuth, readSessionToken } from "./api/auth";
 import { createClient } from "./api/client";
 import "../vendor/shadcn/css/life-recorder-theme.css";
+import "./viewer.css";
 
 const session = window.sessionStorage;
 const booted = bootstrapAuth({

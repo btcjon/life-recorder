@@ -1,6 +1,6 @@
 export const VIEWS = ["recordings", "review", "people", "context", "health"] as const;
 export type AppView = (typeof VIEWS)[number];
-export type SelectedKind = "chunk" | "event";
+export type SelectedKind = "chunk" | "event" | "group";
 export type DetailMode = "transcript" | "turns";
 export type PaneMode = "list" | "detail";
 
@@ -9,7 +9,9 @@ export type RouteState = {
   day: string;
   query: string;
   showQuiet: boolean;
+  showPending: boolean;
   flat: boolean;
+  groups: boolean;
   selectedId: string | null;
   selectedKind: SelectedKind;
   detailMode: DetailMode;
@@ -21,7 +23,9 @@ export const DEFAULT_ROUTE: RouteState = {
   day: "",
   query: "",
   showQuiet: false,
+  showPending: false,
   flat: false,
+  groups: false,
   selectedId: null,
   selectedKind: "chunk",
   detailMode: "transcript",
@@ -43,11 +47,13 @@ export function readRoute(params: URLSearchParams, pathname = ""): RouteState {
     day: params.get("day") || "",
     query: params.get("q") || "",
     showQuiet: params.get("show") === "1",
+    showPending: params.get("pending") === "1",
     flat: params.get("flat") === "1",
+    groups: params.get("groups") === "1",
     selectedId: params.get("id") || null,
-    selectedKind: kind === "event" ? "event" : "chunk",
+    selectedKind: kind === "event" ? "event" : kind === "group" ? "group" : "chunk",
     detailMode: detail === "turns" ? "turns" : "transcript",
-    pane: pane === "detail" ? "detail" : "list",
+    pane: pane === "list" ? "list" : pane === "detail" || params.get("id") ? "detail" : "list",
   };
 }
 
@@ -57,13 +63,17 @@ export function writeRoute(state: RouteState): string {
   if (state.day) params.set("day", state.day);
   if (state.query) params.set("q", state.query);
   if (state.showQuiet) params.set("show", "1");
+  if (state.showPending) params.set("pending", "1");
   if (state.flat) params.set("flat", "1");
+  if (state.groups) params.set("groups", "1");
   if (state.selectedId) {
     params.set("id", state.selectedId);
     if (state.selectedKind === "event") params.set("kind", "event");
+    if (state.selectedKind === "group") params.set("kind", "group");
   }
   if (state.detailMode === "turns") params.set("detail", "turns");
   if (state.pane === "detail") params.set("pane", "detail");
+  else if (state.selectedId) params.set("pane", "list");
   return params.toString();
 }
 

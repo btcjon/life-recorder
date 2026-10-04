@@ -5,22 +5,25 @@ import { AppShell } from "./components/AppShell";
 import { AudioPlayer, type AudioPlayerHandle } from "./components/AudioPlayer";
 import { PeopleView } from "./features/people/PeopleView";
 import { RecordingsView } from "./features/recordings/RecordingsView";
-import { ReviewView, type ReviewPlayRequest } from "./features/review/ReviewView";
+import { ReviewView } from "./features/review/ReviewView";
 import { ContextView } from "./features/context/ContextView";
 import { HealthView } from "./features/health/HealthView";
 import { easternDay } from "./lib/identity";
 import { audioIdentity, type PlayableItem } from "./lib/playback";
-import { dayStatus, toPlayableChunk, toPlayableEvent } from "./lib/recordings";
+import { dayStatus } from "./lib/recordings";
 import { readRoute, routeUrl, type RouteState } from "./lib/route";
 
 export function App({ client }: { client: ApiClient }) {
   const gate = useMemo(() => createRequestGate(), []);
   const playerRef = useRef<AudioPlayerHandle>(null);
   const playNonce = useRef(0);
-  const lastPlayable = useRef<PlayableItem | null>(null);
   const payloadDay = useRef("");
   const [lastChangeId, setLastChangeId] = useState<string | null>(null);
-  const [focus, setFocus] = useState<{ item: PlayableItem; nonce: number; span: ReviewPlayRequest & { expectedAudioId: string; fromStart: boolean } } | null>(null);
+  const [playback, setPlayback] = useState<{
+    item: PlayableItem;
+    nonce: number;
+    span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean } | null;
+  } | null>(null);
   const [route, setRoute] = useState<RouteState>(() => readRoute(new URLSearchParams(window.location.search), window.location.pathname));
   const [days, setDays] = useState<string[]>([]);
   const [payload, setPayload] = useState<DayPayload | null>(null);
@@ -32,7 +35,6 @@ export function App({ client }: { client: ApiClient }) {
   routeRef.current = route;
 
   const updateRoute = useCallback((patch: Partial<RouteState>, historyMode: "push" | "replace" = "replace") => {
-    if (patch.selectedId !== undefined || patch.selectedKind) setFocus(null);
     const next = { ...routeRef.current, ...patch };
     const url = routeUrl(window.location.pathname, next);
     if (historyMode === "push") history.pushState(null, "", url);
@@ -63,7 +65,7 @@ export function App({ client }: { client: ApiClient }) {
     try {
       const next = await client.day(day, ticket.signal);
       if (!ticket.isCurrent()) return false;
-      setPayload(next);
+      setPayload({ ...next, day });
       const text = dayStatus(next);
       setStatus(text);
       setAlert(!!text);
@@ -112,14 +114,20 @@ export function App({ client }: { client: ApiClient }) {
     if (route.day) void loadDay(route.day);
   }, [route.day, route.view, loadDay]);
 
-  useEffect(() => {
-    setFocus(null);
-  }, [route.selectedKind, route.selectedId]);
+  const requestPlay = useCallback((item: PlayableItem, span?: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean } | null) => {
+    playNonce.current += 1;
+    setPlayback({ item, nonce: playNonce.current, span: span ?? null });
+  }, []);
 
   const selectedChunk = route.selectedKind === "chunk" ? (payload?.chunks || []).find((item) => item.id === route.selectedId) : undefined;
   const selectedEvent = route.selectedKind === "event" ? (payload?.events || []).find((item) => item.id === route.selectedId) : undefined;
-  const playable = selectedEvent ? toPlayableEvent(selectedEvent) : selectedChunk ? toPlayableChunk(selectedChunk) : null;
-  if (playable) lastPlayable.current = playable;
+  const selectedGroup = route.selectedKind === "group"
+    ? (payload?.display_blocks || []).find((block) => (block.id || (block.chunk_ids || []).join("-")) === route.selectedId)
+    : undefined;
+  const selection = route.selectedId ? {
+    key: route.selectedKind + ":" + route.selectedId,
+    label: selectedChunk?.started_local || selectedEvent?.started_local || selectedGroup?.title || selectedGroup?.started_local || route.selectedId,
+  } : null;
 
   return (
     <AppShell view={route.view} health={authFailed ? "Open through the local launcher." : health} onView={(view) => {
@@ -127,19 +135,22 @@ export function App({ client }: { client: ApiClient }) {
     }} player={
       <AudioPlayer
         ref={playerRef}
-        item={focus?.item ?? playable ?? lastPlayable.current}
+        item={playback?.item ?? null}
+        selection={selection}
         client={client}
-        playRequest={focus ? { nonce: focus.nonce, span: { key: focus.span.turnId, start: focus.span.started, end: focus.span.ended, expectedAudioId: focus.span.expectedAudioId, fromStart: true } } : null}
+        playRequest={playback ? { nonce: playback.nonce, span: playback.span } : null}
         onKeep={async (id) => {
           await client.keepAudio(id);
           setPayload((current) => current ? { ...current, chunks: (current.chunks || []).map((chunk) => chunk.id === id ? { ...chunk, audio_pinned: true } : chunk) } : current);
+          setPlayback((current) => current && current.item.kind === "chunk" && current.item.id === id
+            ? { ...current, item: { ...current.item, pinned: true } } : current);
         }}
       />
     }>
       {route.view === "recordings" ? (
         <RecordingsView
           route={route}
-          payload={payload}
+          payload={payload?.day === route.day ? payload : null}
           setPayload={setPayload}
           days={days}
           status={status}
@@ -148,6 +159,7 @@ export function App({ client }: { client: ApiClient }) {
           playerRef={playerRef}
           onIdentityChange={setLastChangeId}
           onRoute={updateRoute}
+          onPlayItem={requestPlay}
           onReload={() => route.day ? loadDay(route.day) : false}
           onRefresh={() => { void loadHealth(); if (route.day) void loadDay(route.day); }}
         />
@@ -168,15 +180,9 @@ export function App({ client }: { client: ApiClient }) {
             };
             const expectedAudioId = audioIdentity(item, "original");
             if (!expectedAudioId) return;
-            playNonce.current += 1;
-            setFocus({
-              item,
-              nonce: playNonce.current,
-              span: { ...request, expectedAudioId, fromStart: true },
-            });
+            requestPlay(item, { key: request.turnId, start: request.started, end: request.ended, expectedAudioId, fromStart: true });
           }}
           onOpenRecording={(target) => {
-            setFocus(null);
             updateRoute({
               view: "recordings",
               day: easternDay(target.startedAt) || routeRef.current.day,
@@ -195,7 +201,6 @@ export function App({ client }: { client: ApiClient }) {
           onIdentityChange={setLastChangeId}
           onChanged={() => { if (route.day) void loadDay(route.day); }}
           onOpenRecording={(target) => {
-            setFocus(null);
             updateRoute({
               view: "recordings",
               day: easternDay(target.startedAt) || routeRef.current.day,

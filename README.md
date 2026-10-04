@@ -48,8 +48,15 @@ The receiver writes the combined transcript to `life.md`, daily Markdown files t
 
 ## Mac viewer
 
-The premium React viewer provides Recordings, Review, People, Context and Health,
-with responsive list/detail panes, light/dark mode and a persistent audio player.
+The premium React viewer opens a flat chronological recording list. One click
+shows the full transcript and speaker controls without starting audio. Speaker
+names open the identity picker; separate Play buttons audition source stretches.
+Saved and suggested Groups are a secondary view with ordered source transcripts.
+Speech-only and enhanced clips are under Audio options with every source listed;
+their compressed clocks are not used for source-speaker seeks. Recordings and
+People stay visible in the compact navigation; More contains Review, Context
+and Health. Responsive list/detail panes, light/dark mode and a persistent player
+retain the same audio through filtering, refresh and navigation.
 It uses privately licensed shadcn components, not a second server or database.
 Its static build is served by the same authenticated Python viewer. `/ui-v2/`
 opens it explicitly; `/legacy/` always opens the original viewer. The existing

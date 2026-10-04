@@ -1,0 +1,12 @@
+/* Content rows must grow beyond the licensed theme's fixed button heights. */
+.style-nova .recording-row {
+  height: auto;
+  min-height: 3.5rem;
+  padding-block: 0.5rem;
+}
+
+.style-nova .wrapping-control {
+  height: auto;
+  min-height: 2.5rem;
+  padding-block: 0.5rem;
+}

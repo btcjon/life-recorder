@@ -745,13 +745,16 @@ class Inbox:
         events = []
         with self.connect() as db:
             event_rows = db.execute("SELECT * FROM speech_events ORDER BY started,id").fetchall()
-            part_rows = db.execute("SELECT * FROM speech_event_chunks").fetchall()
+            part_rows = db.execute("""SELECT p.*, c.started AS clip_started
+                FROM speech_event_chunks p LEFT JOIN chunks c ON c.id=p.chunk_id
+                ORDER BY c.started,p.start_seconds,p.chunk_id""").fetchall()
         parts_by_event = {}
         for part in part_rows:
             parts_by_event.setdefault(part["event_id"], []).append({
                 "chunk_id": part["chunk_id"],
                 "start": part["start_seconds"],
                 "end": part["end_seconds"],
+                "clip_started": part["clip_started"],
             })
         for row in event_rows:
             started = meetings_mod.parse_utc(row["started"])
@@ -771,6 +774,7 @@ class Inbox:
                 "started": row["started"],
                 "started_local": started.astimezone(DISPLAY_ZONE).strftime("%Y-%m-%d %H:%M %Z"),
                 "ended": row["ended"],
+                "ended_local": finished.astimezone(DISPLAY_ZONE).strftime("%Y-%m-%d %H:%M %Z"),
                 "duration": row["duration"],
                 "playable_duration": row["playable_duration"] or row["duration"],
                 "source": row["source"],

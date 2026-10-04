@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Chunk, DayPayload } from "../api/types";
-import { audioStateLabel, briefStretch, buildRecordingList, groupTurns, hasPlayableRows, isHiddenQuiet, visibleChunks } from "./recordings";
+import { audioStateLabel, briefStretch, buildRecordingList, derivedScopeCopy, eventSources, firstSearchTarget, groupTurns, hasPlayableRows, highlightSegments, isHiddenQuiet, relatedEvents, visibleChunks } from "./recordings";
 
 function chunk(partial: Partial<Chunk> & { id: string }): Chunk {
   return { status: "complete", transcript: "", audio_playable: true, ...partial };
@@ -16,10 +16,11 @@ describe("recordings visibility", () => {
     expect(isHiddenQuiet(pending, false)).toBe(true);
     expect(isHiddenQuiet(attention, false)).toBe(false);
     expect(visibleChunks([quiet, pending, attention, spoken], "", false).map((item) => item.id)).toEqual(["attention", "spoken"]);
-    expect(visibleChunks([quiet, pending], "", true)).toHaveLength(2);
-    expect(audioStateLabel(pending)).toBe("Processing");
-    expect(audioStateLabel(attention)).toBe("Processing needs attention");
-    expect(audioStateLabel(chunk({ id: "gone", audio_playable: false }))).toBe("Audio not kept");
+    expect(visibleChunks([quiet, pending], "", true)).toHaveLength(1);
+    expect(visibleChunks([quiet, pending], "", true, true)).toHaveLength(2);
+    expect(audioStateLabel(pending)).toBe("Processing transcript");
+    expect(audioStateLabel(attention)).toBe("Transcript processing needs attention");
+    expect(audioStateLabel(chunk({ id: "gone", audio_playable: false, transcript: "Text is kept" }))).toBe("Audio no longer retained");
   });
 
   it("shows an empty match set and does not invent event groups", () => {
@@ -30,14 +31,14 @@ describe("recordings visibility", () => {
         { kind: "chunk", chunk_id: "b" },
       ],
     };
-    const rows = buildRecordingList(payload, { query: "missing", showQuiet: true, flat: false, expanded: new Set() });
+    const rows = buildRecordingList(payload, { query: "missing", showQuiet: true });
     expect(hasPlayableRows(rows)).toBe(false);
-    const provided = buildRecordingList(payload, { query: "", showQuiet: true, flat: false, expanded: new Set() });
-    expect(provided.filter((row) => row.type === "event")).toHaveLength(0);
+    const provided = buildRecordingList(payload, { query: "", showQuiet: true });
+    expect(provided.filter((row) => row.type === "group")).toHaveLength(0);
     expect(provided.filter((row) => row.type === "chunk")).toHaveLength(2);
   });
 
-  it("uses server event groups unless flat view is requested", () => {
+  it("defaults to individual recordings and exposes groups only as a secondary view, never speech rows", () => {
     const payload: DayPayload = {
       chunks: [
         chunk({ id: "a", transcript: "one", duration: 30 }),
@@ -46,13 +47,41 @@ describe("recordings visibility", () => {
       display_blocks: [{ kind: "event", id: "evt", chunk_ids: ["a", "b"], source: "suggested", started_local: "2026-10-04 09:00:00", ended_local: "2026-10-04 09:02:00" }],
       events: [{ id: "speech-1", started_local: "2026-10-04 09:01", audio_playable: false, enhanced_playable: false }],
     };
-    const grouped = buildRecordingList(payload, { query: "", showQuiet: false, flat: false, expanded: new Set() });
-    expect(grouped.some((row) => row.type === "event")).toBe(true);
+    const grouped = buildRecordingList(payload, { query: "", showQuiet: false, groups: true });
+    expect(grouped.some((row) => row.type === "group")).toBe(true);
     expect(grouped.some((row) => row.type === "chunk")).toBe(false);
-    const flat = buildRecordingList(payload, { query: "", showQuiet: false, flat: true, expanded: new Set() });
+    const flat = buildRecordingList(payload, { query: "", showQuiet: false });
     expect(flat.filter((row) => row.type === "chunk")).toHaveLength(2);
-    expect(flat.some((row) => row.type === "event")).toBe(false);
-    expect(grouped.some((row) => row.type === "speech" && row.event.id === "speech-1")).toBe(true);
+    expect(flat.some((row) => row.type === "group")).toBe(false);
+    expect(grouped.map(row => row.key)).toEqual(["evt"]);
+  });
+
+  it("preserves saved group IDs and picks the actual matching source text", () => {
+    const payload: DayPayload = {
+      chunks: [chunk({ id: "a", transcript: "first" }), chunk({ id: "b", transcript: "matching passage" })],
+      display_blocks: [{ id: "saved", source: "manual", title: "Keep this title", kind: "event", chunk_ids: ["a", "b"] }],
+    };
+    const rows = buildRecordingList(payload, { groups: true, query: "matching", showQuiet: false });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ key: "saved", matchId: "b", block: { title: "Keep this title" } });
+    expect(firstSearchTarget(rows)).toEqual({ id: "saved", kind: "group" });
+  });
+
+  it("highlights literal matching text without changing or interpreting HTML", () => {
+    const text = "Before <img onerror=unsafe> MATCH after match.";
+    const segments = highlightSegments(text, "match");
+    expect(segments.map(part => part.text).join("")).toBe(text);
+    expect(segments.filter(part => part.match).map(part => part.text)).toEqual(["MATCH", "match"]);
+    expect(highlightSegments(text, "[").every(part => !part.match)).toBe(true);
+  });
+
+  it("uses real chunk_id source links, including cross-day sources, rather than playback offsets", () => {
+    const event = { id: "event", chunks: [{ chunk_id: "a", start: 42, end: 48 }, { chunk_id: "b", start: 0, end: 4, clip_started: "2026-10-05T04:00:00Z" }] };
+    const sources = eventSources(event, [chunk({ id: "a", started: "2026-10-05T03:59:00Z" })]);
+    expect(sources.map(source => source.id)).toEqual(["a", "b"]);
+    expect(sources[1]).toMatchObject({ present: false, started: "2026-10-05T04:00:00Z" });
+    expect(relatedEvents({ events: [event] }, "a")).toEqual([event]);
+    expect(derivedScopeCopy(sources.length)).toContain("includes 2 recordings");
   });
 
   it("keeps sub-second turns brief and does not invent word timing", () => {

@@ -6,8 +6,8 @@ files, fonts and builds remain ignored. The deployed receiver stays Python-only.
 
 | Surface | Preserved operations |
 | --- | --- |
-| Recordings | Day/search, quiet/pending/attention/flat/group filters, saved event titles and first/last clip boundaries, transcript/brief/speaker turns, retained original audio, keep, retry with missing-original guard |
-| Playback | One stable player across navigation/filter refresh, source-specific blobs, original/enhanced event audio, queued speaker spans, full-play clears pending span, stale requests discarded and blob URLs released |
+| Recordings | Flat chronological default, day/literal passage search, separate quiet/pending filters with failures visible, secondary saved/suggested Groups with full ordered source text and title/boundary editing, separate naming/audition controls, retained original audio, keep, retry with missing-original guard |
+| Playback | Explicit play only; one stable player across navigation/filter refresh, truthful selected versus playing labels, contextual original/enhanced speech clips and cross-day source links, queued source-speaker spans, full-play clears pending span, stale requests discarded and blob URLs released |
 | Review | Revision-consistent paging, local filter, explicit diagnostics, unconfirmed non-preselected suggestions, rejection, span/source open, confirmation with separate sample opt-in |
 | People | Readiness and sample provenance, rename, sample/source open, confirmed withdrawal, conflict-safe undo, anonymous merge/split/name/remove-label previews; no inherited contact-delete action |
 | Context | Visible-only observed-evidence refresh, uncertain open/recovered gaps, timeline/split/merge/topic accept/reject/tag, separate place revisions and save/delete controls |

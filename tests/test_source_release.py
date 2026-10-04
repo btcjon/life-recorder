@@ -81,7 +81,7 @@ class SourceReleaseTests(unittest.TestCase):
         self.git('commit', '-qm', 'viewer assets')
         result, root = self.packaged()
         self.assertEqual(health.source_identity(root, result['manifest_sha256'])['state'], 'verified')
-        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['source_file_count'], 6)
+        self.assertEqual(health.source_identity(root, result['manifest_sha256'])['source_file_count'], 2 + len(release.RELEASE_ASSETS))
         asset = root/'assets/favicon-16.png'
         self.assertEqual(asset.read_bytes(), b'fixture PNG')
         asset.chmod(0o644)

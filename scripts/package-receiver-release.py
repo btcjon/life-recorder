@@ -15,7 +15,8 @@ import tarfile
 import tempfile
 
 RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
-                  'assets/favicon-32.png', 'assets/life-recorder-icon.png'}
+                  'assets/favicon-32.png', 'assets/life-recorder-icon.png',
+                  'mac_context_probe.swift'}
 
 def package(project, output_root):
     project, output_root = Path(project).resolve(), Path(output_root)

@@ -31,8 +31,11 @@ The output gives an exact `receiver_script`, committed source revision and
 argument at that returned path and set `LIFE_RECORDER_SOURCE_MANIFEST_SHA256` to
 the returned digest. Preserve every other argument/environment value. Reload the
 same job when changing its plist. Never edit or overwrite a deployed readonly
-release; create a new committed release. The four exact viewer PNG assets are
-also hash-checked; no recording/database/token is packaged.
+release; create a new committed release. The four exact viewer PNG assets and
+`mac_context_probe.swift` are also hash-checked; no recording/database/token is
+packaged. The Mac context observer compiles that exact Swift source into an
+owner-private cache and checks both source and executable digests before use.
+`LIFE_RECORDER_MAC_CONTEXT=0` disables it; browser playback metadata is not configured.
 This is a source deployment artifact, not a runtime-backup service.
 
 The receiver verifies its complete Python tree before application imports. A

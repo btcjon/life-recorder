@@ -11,6 +11,7 @@ final class ContextTransport: NSObject, ObservableObject, URLSessionDataDelegate
     static let meetingPath = "/v1/meeting-events"
     static let locationPath = "/v1/location/observations"
     static let locationDeletePath = "/v1/location/delete-history"
+    static let contextPath = "/v1/context-observations"
     static let maximumAttempts = 8
     @Published private(set) var pendingCount = 0
     @Published private(set) var status = "No context markers waiting"
@@ -97,7 +98,7 @@ final class ContextTransport: NSObject, ObservableObject, URLSessionDataDelegate
               let raw = try? Data(contentsOf: recordURL(id)),
               raw.count <= 32_768,
               let record = try? JSONDecoder().decode(Record.self, from: raw), record.id == id,
-              [Self.meetingPath, Self.locationPath, Self.locationDeletePath].contains(record.path) else { return nil }
+              [Self.meetingPath, Self.locationPath, Self.locationDeletePath, Self.contextPath].contains(record.path) else { return nil }
         return record
     }
 
@@ -109,15 +110,19 @@ final class ContextTransport: NSObject, ObservableObject, URLSessionDataDelegate
 
     func enqueue(path: String, id: String, payload: Data, expiresAt: Date? = nil) throws {
         guard UUID(uuidString: id)?.uuidString.lowercased() == id,
-              [Self.meetingPath, Self.locationPath, Self.locationDeletePath].contains(path),
+              [Self.meetingPath, Self.locationPath, Self.locationDeletePath, Self.contextPath].contains(path),
               !payload.isEmpty, payload.count <= 4_096,
               let object = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
+            throw OutboxError.invalidMarker
+        }
+        if path == Self.contextPath, !PhoneContextValidation.isValidEnvelope(object, headerDeviceID: QueueStore.deviceID) {
             throw OutboxError.invalidMarker
         }
         let payloadID: String?
         switch path {
         case Self.meetingPath: payloadID = object["event_id"] as? String
         case Self.locationPath: payloadID = (object["observation"] as? [String: Any])?["id"] as? String
+        case Self.contextPath: payloadID = (object["observation"] as? [String: Any])?["id"] as? String
         default: payloadID = object["id"] as? String
         }
         guard payloadID == id else { throw OutboxError.invalidMarker }
@@ -269,9 +274,10 @@ final class ContextTransport: NSObject, ObservableObject, URLSessionDataDelegate
         }
     }
 
-    static func verifiedReceipt(_ data: Data, id: String) -> Bool {
+    static func verifiedReceipt(_ data: Data, id: String, path: String? = nil) -> Bool {
         struct Receipt: Decodable { let durable: Bool; let event_id: String?; let observation_id: String?; let request_id: String?; let id: String? }
         guard data.count <= 16_384, let receipt = try? JSONDecoder().decode(Receipt.self, from: data), receipt.durable else { return false }
+        if path == contextPath, receipt.observation_id != id { return false }
         let receiptIDs = [receipt.event_id, receipt.observation_id, receipt.request_id, receipt.id].compactMap { $0 }
         return !receiptIDs.isEmpty && receiptIDs.allSatisfy { $0 == id }
     }
@@ -292,7 +298,7 @@ final class ContextTransport: NSObject, ObservableObject, URLSessionDataDelegate
         let data = responseData.removeValue(forKey: task.taskIdentifier) ?? Data()
         guard let id = task.taskDescription, var record = read(id) else { pump(); return }
         if error == nil, let http = task.response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-           Self.verifiedReceipt(data, id: id) {
+           Self.verifiedReceipt(data, id: id, path: record.path) {
             record.acknowledged = true
             do { try save(record); remove(id) }
             catch { status = "Mac received context marker; local cleanup pending" }

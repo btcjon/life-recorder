@@ -20,11 +20,17 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
 @main
 struct LifeRecorderApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var recorder = Recorder()
+    @StateObject private var recorder: Recorder
     @StateObject private var uploads = UploadManager.shared
     @Environment(\.scenePhase) private var scenePhase
     @State private var showSettings = false
     @State private var pairingError: String?
+
+    init() {
+        let recorder = Recorder(contextReporter: PhoneContextObserver.shared)
+        _recorder = StateObject(wrappedValue: recorder)
+        PhoneContextObserver.shared.isCapturing = { recorder.recording }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -33,13 +39,18 @@ struct LifeRecorderApp: App {
                     uploads.activate()
                     ContextTransport.shared.activate()
                     LocationContext.shared.activate()
+                    PhoneContextObserver.shared.setExecutionAvailable(scenePhase == .active)
+                    PhoneContextObserver.shared.activate()
                     await recorder.applySchedule()
                 }
                 .onChange(of: scenePhase) { _, phase in
+                    // Foreground execution only. Locked-screen audio is not continuous context sampling.
+                    PhoneContextObserver.shared.setExecutionAvailable(phase == .active)
                     if phase == .active {
                         uploads.activate()
                         ContextTransport.shared.activate()
                         LocationContext.shared.activate()
+                        PhoneContextObserver.shared.activate()
                         Task { await recorder.applySchedule() }
                     }
                 }

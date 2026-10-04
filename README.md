@@ -64,6 +64,36 @@ The FluidAudio CLI currently needs the repository patch in `scripts/fluidaudio-v
 
 ## Recording behavior
 
+### Observed audio context
+
+The human **Context** tab shows separately observed Mac output activity, phone
+audio/call state, and recorder gaps. Mac activity uses public CoreAudio process
+output IO: it is not proof of audible sound or which browser tab is playing.
+YouTube/X playback metadata is not configured. No URLs, browser history, call
+handles, or contact identities are collected. Context never changes transcripts,
+speaker labels, event boundaries, or machine transcript permissions.
+
+The Mac samples every 2 seconds and refreshes active observations every 15 seconds.
+Activity expires after 30 seconds without a valid refresh. The Context pane
+refreshes its evidence every 5 seconds while visible. Sampled boundaries remain
+uncertain; late or future timestamps cannot become precise/current associations.
+Set `LIFE_RECORDER_MAC_CONTEXT=0` in the existing job environment to disable the
+Mac observer without deleting its history. The Swift helper source is included
+in the immutable release manifest; its private compiled cache is hash-checked.
+
+Phone audio state is sampled at lifecycle events and every 15 seconds in the
+foreground; categorical call callbacks may arrive while the process executes.
+This is not continuous locked-screen monitoring. Capture gaps open on actual
+recorder stops, or with explicit uncertainty after an unseen termination or
+startup failure. Only a successful capture restart closes a gap. The original
+stop observation is preserved for idempotent replay after relaunch. Context has
+its own durable pinned outbox and cannot block audio receipts. See
+[context-awareness.md](docs/context-awareness.md) for the evidence limits and
+acceptance checks. A tested source change is not proof of installation or a
+physical call/locked-screen trial; dated deployment evidence is in INSTALL-NOTES.
+
+### Capture and schedule
+
 Tap the recorder switch once. Recording continues while the screen is locked and while other apps are used. If the iPhone is rebooted or the app is force-quit, iOS requires opening Life Recorder once before microphone capture can resume. Pending audio remains on the phone until the receiver acknowledges it. Upload tasks are retried and stale connectivity tasks are cancelled so they cannot hold the queue indefinitely.
 
 The recorder pauses automatically from 10:00 PM to 5:00 AM America/New_York and resumes at 5:00 AM while the app remains in memory. iOS can still require one manual open after a reboot or force-quit.

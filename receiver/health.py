@@ -11,7 +11,8 @@ DELAY_SECONDS = 10 * 60
 STORAGE_RESERVE_BYTES = 256 * 1024 * 1024
 MAX_UPLOAD_BYTES = 32 * 1024 * 1024
 RELEASE_ASSETS = {'assets/apple-touch-icon.png', 'assets/favicon-16.png',
-                  'assets/favicon-32.png', 'assets/life-recorder-icon.png'}
+                  'assets/favicon-32.png', 'assets/life-recorder-icon.png',
+                  'mac_context_probe.swift'}
 
 
 def source_identity(root=None, manifest_pin=None):

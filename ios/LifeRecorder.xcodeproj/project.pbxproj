@@ -13,6 +13,9 @@
 		C01A00000000000000000004 /* ChunkContextSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000014 /* ChunkContextSnapshot.swift */; };
 		C01A00000000000000000005 /* MeetingCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000015 /* MeetingCaptureTests.swift */; };
 		C01A00000000000000000006 /* LocationContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000016 /* LocationContextTests.swift */; };
+		C01A00000000000000000007 /* PhoneContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000017 /* PhoneContext.swift */; };
+		C01A00000000000000000008 /* PhoneContextObserver.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000018 /* PhoneContextObserver.swift */; };
+		C01A00000000000000000009 /* PhoneContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C01A00000000000000000019 /* PhoneContextTests.swift */; };
 		066F079475FA4272323846E7 /* UploadManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4912CAE16CD5C6C2B739463D /* UploadManager.swift */; };
 		A11C01E70000000000000004 /* UploadDelivery.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C01E70000000000000021 /* UploadDelivery.swift */; };
 		A11C01E70000000000000005 /* UploadDeliveryTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A11C01E70000000000000022 /* UploadDeliveryTests.swift */; };
@@ -46,6 +49,9 @@
 		C01A00000000000000000014 /* ChunkContextSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChunkContextSnapshot.swift; sourceTree = "<group>"; };
 		C01A00000000000000000015 /* MeetingCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MeetingCaptureTests.swift; sourceTree = "<group>"; };
 		C01A00000000000000000016 /* LocationContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocationContextTests.swift; sourceTree = "<group>"; };
+		C01A00000000000000000017 /* PhoneContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneContext.swift; sourceTree = "<group>"; };
+		C01A00000000000000000018 /* PhoneContextObserver.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneContextObserver.swift; sourceTree = "<group>"; };
+		C01A00000000000000000019 /* PhoneContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneContextTests.swift; sourceTree = "<group>"; };
 		1E138E288F79C8B5DE281250 /* Storage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Storage.swift; sourceTree = "<group>"; };
 		1EE7061AC1E987E130601AC9 /* LifeRecorderTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = LifeRecorderTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		248F26ABAF4F063BA289ED46 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -83,6 +89,8 @@
 				C01A00000000000000000012 /* MeetingCapture.swift */,
 				C01A00000000000000000013 /* LocationContext.swift */,
 				C01A00000000000000000014 /* ChunkContextSnapshot.swift */,
+				C01A00000000000000000017 /* PhoneContext.swift */,
+				C01A00000000000000000018 /* PhoneContextObserver.swift */,
 			);
 			path = LifeRecorder;
 			sourceTree = "<group>";
@@ -106,6 +114,7 @@
 				C3E9A2309C3E6D201B43F003 /* ActivityProbeTests.swift */,
 				C01A00000000000000000015 /* MeetingCaptureTests.swift */,
 				C01A00000000000000000016 /* LocationContextTests.swift */,
+				C01A00000000000000000019 /* PhoneContextTests.swift */,
 			);
 			path = LifeRecorderTests;
 			sourceTree = "<group>";
@@ -212,6 +221,8 @@
 				C01A00000000000000000002 /* MeetingCapture.swift in Sources */,
 				C01A00000000000000000003 /* LocationContext.swift in Sources */,
 				C01A00000000000000000004 /* ChunkContextSnapshot.swift in Sources */,
+				C01A00000000000000000007 /* PhoneContext.swift in Sources */,
+				C01A00000000000000000008 /* PhoneContextObserver.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -226,6 +237,7 @@
 				D4F0B3410D4F7E312C540004 /* ActivityProbeTests.swift in Sources */,
 				C01A00000000000000000005 /* MeetingCaptureTests.swift in Sources */,
 				C01A00000000000000000006 /* LocationContextTests.swift in Sources */,
+				C01A00000000000000000009 /* PhoneContextTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

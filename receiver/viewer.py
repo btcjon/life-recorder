@@ -219,6 +219,7 @@ APP = """<!doctype html>
   <section id="context-view" hidden aria-labelledby="context-heading">
     <h2 id="context-heading">Timeline and places</h2>
     <p id="context-status" class="meta" aria-live="polite"></p>
+    <div id="observed-context"></div>
     <div id="timeline-tools"></div>
     <div id="place-tools"></div>
   </section>
@@ -1884,6 +1885,66 @@ JS = r"""
     document.getElementById("context-status").textContent = "Saved. Reloaded current revisions.";
     await loadContextTools();
   }
+  function renderObservedContext(report) {
+    const host = document.getElementById("observed-context");
+    host.replaceChildren();
+    const card = toolNode("section", undefined, host);
+    card.className = "context-card";
+    toolNode("h3", "Observed context", card);
+    toolNode("p", report.statement || "Overlapping context. This is not a recording source.", card);
+    const adapter = report.browser_adapter || {};
+    toolNode("p", adapter.available ? "Browser media metadata is available." : "Browser metadata is unavailable. " + (adapter.note || "YouTube and X playback metadata has not been configured or verified."), card);
+    const freshness = report.freshness || {};
+    toolNode("p", "Observer freshness: " + (freshness.label || "unknown") + (freshness.detail ? ". " + freshness.detail : ""), card);
+    toolNode("h4", "Open capture gaps", card);
+    const gaps = report.open_capture_gaps || [];
+    if (!gaps.length) toolNode("p", "No open capture gap in this read.", card);
+    for (const gap of gaps) {
+      const uncertain = gap.uncertain ? " The boundary is uncertain." : " The stop is the reported inactive observation.";
+      const stale = (gap.uncertainties || []).indexOf("no_fresh_observer") >= 0 ? " No fresh observer, so this gap stays open and uncertain." : "";
+      const reason = gap.reason ? " Reported reason, not a cause: " + gap.reason + "." : "";
+      toolNode("p", "Open recording gap from " + gap.started_at + ". " + Math.round(gap.duration_seconds || 0) + " seconds since this observation; not a final duration. No successful restart has been observed." + uncertain + stale + reason, card);
+    }
+    const closedGaps = (report.capture_gaps || []).filter(gap => !gap.open);
+    if (closedGaps.length) toolNode("h4", "Recovered capture gaps", card);
+    for (const gap of closedGaps) {
+      toolNode("p", gap.started_at + " → " + gap.ended_at + " · " + Math.round(gap.duration_seconds || 0) + " seconds" + (gap.uncertain ? " · uncertain boundary" : "") + (gap.reason ? " · reported reason: " + gap.reason : ""), card);
+    }
+    toolNode("h4", "Intervals", card);
+    const intervals = report.intervals || [];
+    if (!intervals.length) toolNode("p", "No context intervals in this read.", card);
+    for (const item of intervals) {
+      const when = item.started_at + " → " + (item.ended_at || item.effective_until || "open");
+      const bits = [item.signal, item.state, item.app || "no app", when];
+      if (item.fresh) bits.push("fresh");
+      else if (item.stale) bits.push("stale");
+      if (!item.boundary_exact) bits.push("boundary not exact");
+      if (item.uncertain) bits.push("uncertain");
+      if (item.precise_transcript_association === false) bits.push("clock skew excludes a precise transcript association");
+      if (item.open_recording_gap) bits.push("open recording gap");
+      if (item.title) bits.push(item.title);
+      if (item.call_state) bits.push("call " + item.call_state);
+      toolNode("p", bits.filter(Boolean).join(" · "), card);
+      if (item.reason) toolNode("p", "Reported reason, not a cause: " + item.reason, card);
+    }
+    if (report.truncated) toolNode("p", "This context read is limited to recent evidence.", card);
+  }
+  let observedContextBusy = false;
+  async function refreshObservedContext() {
+    if (observedContextBusy) return;
+    observedContextBusy = true;
+    try {
+      const path = day.value ? "/v1/context-evidence?day=" + encodeURIComponent(day.value) : "/v1/context-evidence";
+      renderObservedContext(await toolRead(path));
+    } catch (error) {
+      const observed = document.getElementById("observed-context");
+      observed.replaceChildren();
+      toolNode("p", "Observed context is unavailable.", observed);
+    } finally { observedContextBusy = false; }
+  }
+  setInterval(() => {
+    if (document.visibilityState === "visible" && !document.getElementById("context-view").hidden) refreshObservedContext();
+  }, 5000);
   async function loadContextTools() {
     const message = document.getElementById("context-status");
     try {
@@ -1933,6 +1994,7 @@ JS = r"""
       }
       if (contextReport.truncated) toolNode("p", "This timeline is limited. Select a day to narrow it.", timelinePane);
       renderPlaceTools();
+      await refreshObservedContext();
       if (!message.textContent) message.textContent = "Phone context and human event tags have separate sources.";
     } catch (error) { message.textContent = error.message; }
   }
@@ -2647,6 +2709,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
                 return self._json(error.status, error.payload)
         if path == "/v1/places":
             return self._json(200, self._inbox().places_list())
+        if path == "/v1/context-evidence":
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            if set(query) - {"day"} or len(query.get("day", [])) > 1:
+                return self._json(400, {"error": "Invalid context query"})
+            day = (query.get("day") or [None])[0]
+            if day == "":
+                return self._json(400, {"error": "Invalid context query"})
+            try:
+                return self._json(200, self._inbox().context_evidence(day))
+            except ValueError:
+                return self._json(400, {"error": "Invalid context query"})
         if path.startswith("/v1/audio/"):
             chunk_id = path.removeprefix("/v1/audio/")
             row = self._inbox().receipt(chunk_id)

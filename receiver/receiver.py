@@ -45,6 +45,8 @@ import timeline
 import topic_analysis
 import boundary_suggestions
 import place_context
+import context_observations
+import mac_context
 from agent_api.errors import AgentError
 
 MAX_UPLOAD = 32 * 1024 * 1024
@@ -194,6 +196,7 @@ class Inbox:
             topic_analysis.ensure_schema(db)
             place_context.ensure_schema(db)
             place_context.cleanup(db)
+            context_observations.ensure_schema(db)
             self._reconcile_index(db)
         # Recover a crash after a transcript transaction but before Markdown refresh.
         self.export()
@@ -667,6 +670,17 @@ class Inbox:
             place_context.cleanup(db)
             return (place_context.clear_history(db, device, body) if delete
                     else place_context.ingest_observation(db, device, body))
+
+    def store_context_observation(self, device, body, now=None):
+        """Durable context receipt. Does not touch audio, transcripts, or event ids."""
+        with self.lock, self.connect() as db:
+            return context_observations.ingest(db, device, body, time.time() if now is None else now)
+
+    def context_evidence(self, day=None, now=None):
+        with self.connect() as db:
+            return context_observations.present(
+                db, day=day, now=now, observer_status=getattr(self, "mac_context_status", None)
+            )
 
     def viewer_days(self) -> list[str]:
         days = set()
@@ -1150,6 +1164,28 @@ class Handler(BaseHTTPRequestHandler):
         ]
         return self.respond(200, {"chunks": records, "health": self.inbox.health_snapshot(device_id=device_id)})
 
+    def handle_context_observation(self):
+        try:
+            if self.headers.get("Transfer-Encoding"):
+                return self.respond(413, {"error": "Invalid context size"})
+            length = int(self.headers.get("Content-Length", "0"))
+            if length > context_observations.MAX_BODY:
+                return self.respond(413, {"error": "Invalid context size"})
+            if length <= 0:
+                return self.respond(400, {"error": "Invalid context observation"})
+            raw = self.rfile.read(length)
+            if len(raw) != length or raw.startswith(b"\xef\xbb\xbf"):
+                return self.respond(400, {"error": "Invalid context observation"})
+            device = valid_uuid(self.headers.get("X-Device-ID", ""))
+            body = json.loads(raw.decode("utf-8"))
+            result = self.inbox.store_context_observation(device, body)
+        except context_observations.Conflict:
+            return self.respond(409, {"error": "Context observation conflict"})
+        except (ValueError, OverflowError, json.JSONDecodeError, TypeError, KeyError, UnicodeError):
+            return self.respond(400, {"error": "Invalid context observation"})
+        status = 200 if result["duplicate"] else 201
+        return self.respond(status, {"durable": True, "observation_id": result["observation_id"]})
+
     def handle_meeting_event(self):
         length = int(self.headers.get("Content-Length", "0"))
         if not 0 < length <= meetings_mod.MAX_BODY or self.headers.get("Transfer-Encoding"):
@@ -1173,6 +1209,8 @@ class Handler(BaseHTTPRequestHandler):
         try:
             if self.path == "/v1/meeting-events":
                 return self.handle_meeting_event()
+            if self.path == "/v1/context-observations":
+                return self.handle_context_observation()
             if self.path in ('/v1/location/observations', '/v1/location/delete-history'):
                 device = valid_uuid(self.headers.get('X-Device-ID', ''))
                 length = int(self.headers.get('Content-Length', '0'))
@@ -1441,6 +1479,15 @@ def main():
     summary_thread = threading.Thread(target=event_summaries.worker, args=(inbox, stop), daemon=True)
     summary_thread.start()
     viewer_mod.start_viewer(inbox, remote=remote)
+    try:
+        context_observer = mac_context.start(inbox, stop)
+    except Exception:
+        context_observer = None
+        inbox.mac_context_status = {
+            "running": False, "helper": "unavailable",
+            "browser_adapter": context_observations.BROWSER_ADAPTER,
+            "measures_audible_sound": False,
+        }
     print(f"Receiver listening on {args.host}:{args.port}; local transcripts: {inbox.root / 'life.md'}", flush=True)
     try:
         server.serve_forever()
@@ -1448,6 +1495,7 @@ def main():
         pass
     finally:
         stop.set()
+        mac_context.join(context_observer, timeout=5)
         identity_thread.join(timeout=5)
         summary_thread.join(timeout=5)
         if inbox.viewer_server:

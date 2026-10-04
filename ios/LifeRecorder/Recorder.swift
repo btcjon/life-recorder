@@ -21,8 +21,10 @@ final class Recorder: ObservableObject {
     private var inputFormat: AVAudioFormat?
     private let contextSnapshot = ChunkContextSnapshot()
     private var contextObservation: AnyCancellable?
+    var contextReporter: CaptureContextReporting?
 
-    init() {
+    init(contextReporter: CaptureContextReporting? = nil) {
+        self.contextReporter = contextReporter
         contextObservation = LocationContext.shared.$lastObservation.sink { [contextSnapshot] observation in
             contextSnapshot.update(id: observation?.id, capturedAt: observation?.capturedAt)
         }
@@ -36,7 +38,7 @@ final class Recorder: ObservableObject {
             object: nil, queue: .main) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    await self.stopCapture()
+                    await self.stopCapture(reason: PhoneContextReason.interruption)
                     await self.resumeIfEnabled(allowBackground: true)
                 }
             })
@@ -57,7 +59,7 @@ final class Recorder: ObservableObject {
         if value { await applySchedule() }
         else {
             scheduleTimer?.invalidate()
-            await stopCapture()
+            await stopCapture(reason: PhoneContextReason.manual)
             status = "Recorder is off"
         }
     }
@@ -68,7 +70,7 @@ final class Recorder: ObservableObject {
             return
         }
         if QuietHours.isActive(at: now) {
-            await stopCapture()
+            await stopCapture(reason: PhoneContextReason.quietHours)
             status = "Quiet hours until 5:00 AM Eastern"
         } else {
             await resumeIfEnabled(allowBackground: true)
@@ -97,9 +99,14 @@ final class Recorder: ObservableObject {
             let granted = await withCheckedContinuation { continuation in
                 AVAudioApplication.requestRecordPermission { continuation.resume(returning: $0) }
             }
-            guard granted else { status = "Allow microphone access in Settings to record"; return }
+            guard granted else {
+                status = "Allow microphone access in Settings to record"
+                contextReporter?.captureDidFailToStart()
+                return
+            }
         } else if permission == .denied {
             status = "Allow microphone access in Settings to record"
+            contextReporter?.captureDidFailToStart()
             return
         }
         guard enabled else { return } // The switch may have changed during permission/recovery.
@@ -117,7 +124,7 @@ final class Recorder: ObservableObject {
             }, onError: { [weak self] message in
                 Task { @MainActor in
                     guard let self else { return }
-                    await self.stopCapture()
+                    await self.stopCapture(reason: PhoneContextReason.captureError)
                     self.status = message
                 }
             }, locationObservationID: { [contextSnapshot] chunkStart in
@@ -131,11 +138,13 @@ final class Recorder: ObservableObject {
             inputFormat = format
             recording = true
             status = "Recording, including when locked"
+            contextReporter?.captureDidStart()
             armScheduleTimer()
         } catch {
             try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
             inputFormat = nil
             status = "Could not start: " + error.localizedDescription
+            contextReporter?.captureDidFailToStart()
         }
     }
 
@@ -147,9 +156,10 @@ final class Recorder: ObservableObject {
         }
     }
 
-    private func stopCapture(deactivate: Bool = true) async {
+    private func stopCapture(deactivate: Bool = true, reason: String) async {
         guard !stopping else { return }
         stopping = true
+        let wasRecording = recording
         routeWorkItem?.cancel()
         routeWorkItem = nil
         let backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Finish audio chunk")
@@ -161,6 +171,7 @@ final class Recorder: ObservableObject {
         if engine?.isRunning == true { engine?.stop() }
         engine = nil
         recording = false
+        if wasRecording { contextReporter?.captureDidStop(reason: reason) }
         let previous = writer
         writer = nil
         inputFormat = nil
@@ -174,7 +185,7 @@ final class Recorder: ObservableObject {
               let type = AVAudioSession.InterruptionType(rawValue: raw) else { return }
         if type == .began {
             interrupted = true
-            await stopCapture(deactivate: false)
+            await stopCapture(deactivate: false, reason: PhoneContextReason.interruption)
             if enabled { status = "Interrupted by another audio session" }
         } else {
             interrupted = false
@@ -210,7 +221,7 @@ final class Recorder: ObservableObject {
                 currentFormat: inputFormat,
                 newFormat: newFormat)
             guard rebuild else { return }
-            await stopCapture(deactivate: false)
+            await stopCapture(deactivate: false, reason: PhoneContextReason.route)
             await resumeIfEnabled(allowBackground: true)
         } catch {
             status = "Could not keep recording after an audio-route change"

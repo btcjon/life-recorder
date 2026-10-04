@@ -45,6 +45,14 @@ source passage. Selection and grouping changes must not switch global playback.
 - Rendered desktop, 320px and 390px checks; full frontend and Python suites.
 - Immutable release, consistent backup and live auth/index/identity checks.
 
-One bounded Astra planning consultation selected this approach. Separate backend
-and frontend workers have disjoint file ownership; the lead integrates, verifies
-and owns rollout. Final review is conditional on execution evidence.
+## Verified rollout
+
+Deployed revision `6ca19919e98055650d6133c22776862febcf697e`. Astra planned
+and accepted the source review. Two disjoint bounded workers ended unverified;
+the lead completed integration and verification. All 425 backend and 80 frontend
+tests passed, along with typecheck, lint, build and diff checks. Desktop and
+320/390px browser workflows passed, including refresh-driven regrouping without
+replacing active audio. Live API and rendered sidebar show 13 inferred groups
+covering today's 42 recordings exactly once. Saved labels and edits, 98 stored
+recordings, search/index continuity, authentication and frozen source/asset
+identity passed. See INSTALL-NOTES.md for rollout and rollback evidence.

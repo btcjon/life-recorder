@@ -4,6 +4,47 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-04 context grouping in the primary sidebar
+
+The user's correction supersedes the flat-default decision below. Deployed
+source/UI revision `6ca19919e98055650d6133c22776862febcf697e` defaults to
+context groups with meaningful topic titles directly in the sidebar. Saved
+human boundaries win; current topic segments remain visibly inferred. Explicit
+meetings and labeled time groups cover sources without verified topics.
+Individual recordings and expandable group sources remain available. Selecting
+a group opens ordered full source text without playing audio or accepting it.
+
+Astra planned and reviewed the work. Both bounded Grok workers ended without
+verified delivery; the lead completed and tested the changes. Verification:
+425 Python tests, 80 frontend tests, typecheck, lint, build and diff checks
+passed. Desktop and 320/390px synthetic browser checks covered title/passage
+search, source expansion, naming with enrollment off, explicit playback and
+Back focus. Rendered refresh-driven regrouping recovered the selected source
+while preserving the same playing audio and advancing clock.
+
+The live day API and rendered default sidebar show 13 inferred topic groups for
+all 42 recordings on October 4, exactly once. The full read-only projection
+represents all 98 stored recordings exactly once and performs no writes. No
+suggestion was silently accepted. Existing whole rows for one person, 67
+confirmed speaker assignments, zero voice samples and zero human event edits
+were preserved. All 98 completed recordings, 92/92 search documents, event IDs,
+cursor key and SQLite integrity passed post-deployment checks.
+
+A consistent private database/plist/source backup preceded rollout. Two no-op
+schema rehearsals preserved all 48 table hashes; this change adds no schema.
+The frozen release has 46 manifest-verified files, including five frontend
+assets (870,072 bytes) built from 53 committed and 32 private licensed inputs.
+Only the existing job's source path and manifest pin changed. New PID 10876,
+verified source identity, five served asset hashes, health 200/401, original
+audio range 206, viewer loopback scope, and machine human/audio/mutation denials
+passed. No new error-log bytes during bounded verification. Legacy remains
+available. No public push, iOS change, capture change or extra provider call.
+
+Rollback restores only the prior immutable source path and manifest pin from
+the private safety backup. Never replace the live database over newer uploads.
+Browser audio checks prove player routing and clock behavior, not listening
+quality or a new physical-phone recording.
+
 ## 2026-10-04 transcript-first viewer rollout
 
 Implemented the accepted Astra plan and deployed source/UI revision

@@ -35,7 +35,7 @@ database.
 ## UI and safety
 
 - Recordings and People stay in the top bar. Review, Context and Health stay on their direct routes under More. There is no second sidebar.
-- The recording list defaults to individual recordings. Groups is a secondary view for saved and suggested boundaries. Speech-only clips stay in Audio options, not a parallel list.
+- The sidebar defaults to context groups: saved boundaries, inferred AI topic titles, explicit meetings and labeled time fallback. Individual recordings is secondary; every group exposes its source recordings. Displaying an inferred group never accepts it. Speech-only clips stay in Audio options, not a parallel list.
 - Choosing a row opens text. Play is a separate control. Naming opens the picker and does not start audio. Sample enrollment stays off unless checked.
 - Recordings, Review, People, Context and Health call the same-origin human APIs.
 - Local token bootstrap uses a fragment once, clears it, and stores the token only

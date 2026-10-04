@@ -25,7 +25,7 @@ export const DEFAULT_ROUTE: RouteState = {
   showQuiet: false,
   showPending: false,
   flat: false,
-  groups: false,
+  groups: true,
   selectedId: null,
   selectedKind: "chunk",
   detailMode: "transcript",
@@ -34,6 +34,11 @@ export const DEFAULT_ROUTE: RouteState = {
 
 function isView(value: string | null): value is AppView {
   return !!value && (VIEWS as readonly string[]).includes(value);
+}
+
+function groupedMode(params: URLSearchParams): boolean {
+  if (params.get("groups") === "0" || params.get("flat") === "1") return false;
+  return true;
 }
 
 export function readRoute(params: URLSearchParams, pathname = ""): RouteState {
@@ -49,7 +54,7 @@ export function readRoute(params: URLSearchParams, pathname = ""): RouteState {
     showQuiet: params.get("show") === "1",
     showPending: params.get("pending") === "1",
     flat: params.get("flat") === "1",
-    groups: params.get("groups") === "1",
+    groups: groupedMode(params),
     selectedId: params.get("id") || null,
     selectedKind: kind === "event" ? "event" : kind === "group" ? "group" : "chunk",
     detailMode: detail === "turns" ? "turns" : "transcript",
@@ -64,8 +69,11 @@ export function writeRoute(state: RouteState): string {
   if (state.query) params.set("q", state.query);
   if (state.showQuiet) params.set("show", "1");
   if (state.showPending) params.set("pending", "1");
-  if (state.flat) params.set("flat", "1");
   if (state.groups) params.set("groups", "1");
+  else {
+    params.set("groups", "0");
+    if (state.flat) params.set("flat", "1");
+  }
   if (state.selectedId) {
     params.set("id", state.selectedId);
     if (state.selectedKind === "event") params.set("kind", "event");

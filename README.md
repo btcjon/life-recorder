@@ -48,10 +48,11 @@ The receiver writes the combined transcript to `life.md`, daily Markdown files t
 
 ## Mac viewer
 
-The premium React viewer opens a flat chronological recording list. One click
-shows the full transcript and speaker controls without starting audio. Speaker
+The premium React viewer opens context groups in its primary sidebar. One click
+shows ordered source transcripts without starting audio. Individual recordings
+remain available in a secondary view. Speaker
 names open the identity picker; separate Play buttons audition source stretches.
-Saved and suggested Groups are a secondary view with ordered source transcripts.
+Saved human boundaries take precedence over visibly inferred topic groups.
 Speech-only and enhanced clips are under Audio options with every source listed;
 their compressed clocks are not used for source-speaker seeks. Recordings and
 People stay visible in the compact navigation; More contains Review, Context
@@ -154,7 +155,29 @@ The viewer's Review tab pages through uncertain speaker turns, prioritizing turn
 
 ### Sidebar events
 
-Sidebar groups come from `display_blocks` in `receiver/viewer.py`. That function only arranges clips already loaded for the day. A group contains at least two transcribed clips on the same America/New_York date, and each following transcribed clip starts within 120 seconds of the previous transcribed clip's end. Blank transcripts stay inside a group only when transcribed clips on both sides join, and they do not extend the gap. A longer gap, a different local date, or an invalid timestamp is its own row. Quiet hours do not split these groups. The visible label is Event. The group id is the first 16 hex characters of the SHA-256 of the joined member ids. Opening a group does not fetch each child recording.
+The primary sidebar defaults to context groups, with individual source recordings
+available in a secondary view or under each group's source disclosure. The
+read-only day projection uses saved human boundaries first, then current AI topic
+segments, explicit meeting intervals, and clearly labeled time groups for
+uncovered recordings. Topic titles and boundaries remain inferred until a human
+saves them; showing a group does not accept a suggestion or change the database.
+Participant-change candidates remain advisory in Context.
+
+Each topic proposal is checked against its entire persisted source window before
+its segment anchors are sliced or clipped to the selected day. Changed, deleted
+or interleaved recordings invalidate it. Saved human overlap suppresses the
+whole proposed segment, and competing proposals resolve deterministically.
+Independent model windows stay separate even when titles match. Every recording
+is represented exactly once before user filters, including uncovered singletons,
+quiet, pending and expired clips. Search can match a title or source text;
+opening a group shows ordered full source transcripts without starting playback.
+
+Time fallback uses `display_blocks` in `receiver/viewer.py`, scoped to uncovered
+runs without bridging assigned groups or devices. A time group needs at least
+two transcribed clips on one America/New_York date with at most 120 seconds
+between the previous transcribed clip's end and the next start. Blank clips can
+remain between joined transcribed clips but do not extend the gap. Longer gaps
+and invalid timestamps remain separate. Time proximity is not topic inference.
 
 A person can save a title and explicit first and last clip for a group. That edit lives in `event_edits`, separate from automatic grouping, speech-event playback, and capture-session headings. Its id stays stable when the title or boundaries change. A saved boundary wins over automatic grouping, keeps clips that later upload between its anchors, and is not replaced when a summary is regenerated. Explicit human edits may cover one clip or cross midnight; each day shows its portion under the same identity. They must stay in time order and not overlap another edit. Saving sends the revision last read; a mismatch is rejected and nothing is written. The route is human-authenticated. Machine credentials cannot use it. Sidebar names on a group are confirmed speaker assignments only.
 

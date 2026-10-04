@@ -57,6 +57,7 @@ export function RecordingsView({
   const listScroll = useRef(0);
   const listRef = useRef<HTMLDivElement>(null);
   const appliedQuery = useRef<string | null>(null);
+  const groupAnchor = useRef<{ id: string; sourceId: string; day: string } | null>(null);
   const selectedRef = useRef({ kind: route.selectedKind, id: route.selectedId });
   selectedRef.current = { kind: route.selectedKind, id: route.selectedId };
   const rows = useMemo(
@@ -66,9 +67,11 @@ export function RecordingsView({
   const chunk = route.selectedKind === "chunk" ? (payload?.chunks || []).find((item) => item.id === route.selectedId) || null : null;
   const event = route.selectedKind === "event" ? (payload?.events || []).find((item) => item.id === route.selectedId) || null : null;
   const groupBlock = route.selectedKind === "group" ? (payload?.display_blocks || []).find((block) => (block.id || (block.chunk_ids || []).join("-")) === route.selectedId) || null : null;
-  const group = groupBlock && payload && qualifiesAsGroup(groupBlock, groupMembers(payload, groupBlock, true, true))
-    ? { block: groupBlock, members: groupMembers(payload, groupBlock, true, true) }
-    : null;
+  const group = useMemo(() => {
+    if (!groupBlock || !payload) return null;
+    const members = groupMembers(payload, groupBlock, true, true);
+    return qualifiesAsGroup(groupBlock, members) ? { block: groupBlock, members } : null;
+  }, [groupBlock, payload]);
   const speakerChunk = chunk;
   const hasSpeakerDetail = Array.isArray(speakerChunk?.speakers);
 
@@ -96,10 +99,26 @@ export function RecordingsView({
 
   useEffect(() => {
     if (!payload || !route.selectedId || status === "Loading") return;
-    if (!selectionStillPresent(payload, route.selectedKind, route.selectedId)) {
+    if (payload.day && route.day && payload.day !== route.day) return;
+    if (selectionStillPresent(payload, route.selectedKind, route.selectedId)) {
+      if (group) {
+        const source = group.members.find(item => (item.transcript || "").toLowerCase().includes(route.query.trim().toLowerCase())) || group.members[0];
+        if (source) groupAnchor.current = { id: route.selectedId, sourceId: source.id, day: route.day };
+      }
+      return;
+    }
+    const anchor = groupAnchor.current;
+    if (route.selectedKind === "group" && anchor?.id === route.selectedId && anchor.day === route.day && payload.chunks?.some(item => item.id === anchor.sourceId)) {
+      const next = payload.display_blocks?.find(block => block.chunk_ids?.includes(anchor.sourceId));
+      if (next && qualifiesAsGroup(next, groupMembers(payload, next, true, true))) {
+        onRoute({ selectedId: next.id || (next.chunk_ids || []).join("-"), selectedKind: "group" }, "replace");
+      } else {
+        onRoute({ selectedId: anchor.sourceId, selectedKind: "chunk" }, "replace");
+      }
+    } else {
       onRoute({ selectedId: null, selectedKind: "chunk", pane: "list" }, "replace");
     }
-  }, [payload, route.selectedId, route.selectedKind, onRoute, status]);
+  }, [payload, route.day, route.query, route.selectedId, route.selectedKind, group, onRoute, status]);
 
   useEffect(() => {
     const current = speakerChunk;
@@ -166,7 +185,10 @@ export function RecordingsView({
     if (mobile && route.pane === "list") {
       if (listRef.current) listRef.current.scrollTop = listScroll.current;
       if (restoreFocus.current) {
-        document.getElementById("recording-" + restoreFocus.current)?.focus();
+        const target = document.getElementById("recording-" + restoreFocus.current);
+        const disclosure = target?.closest("details");
+        if (disclosure) disclosure.open = true;
+        target?.focus();
         restoreFocus.current = null;
       }
     }
@@ -273,8 +295,8 @@ export function RecordingsView({
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
       <div className="flex min-w-0 flex-wrap items-center gap-2 border-b px-3 py-2">
         <div role="group" aria-label="Library view" className="flex gap-1">
-          <Button type="button" size="sm" variant={route.groups ? "outline" : "secondary"} className="touch-target" aria-pressed={!route.groups} onClick={() => onRoute({ groups: false, selectedId: null, selectedKind: "chunk", pane: "list" }, "replace")}>Recordings</Button>
-          <Button type="button" size="sm" variant={route.groups ? "secondary" : "outline"} className="touch-target" aria-pressed={route.groups} onClick={() => onRoute({ groups: true, selectedId: null, selectedKind: "group", pane: "list" }, "replace")}>Groups</Button>
+          <Button type="button" size="sm" variant={route.groups ? "secondary" : "outline"} className="touch-target" aria-pressed={route.groups} onClick={() => onRoute({ groups: true, flat: false, selectedId: null, selectedKind: "group", pane: "list" }, "replace")}>Groups</Button>
+          <Button type="button" size="sm" variant={route.groups ? "outline" : "secondary"} className="touch-target" aria-pressed={!route.groups} onClick={() => onRoute({ groups: false, flat: true, selectedId: null, selectedKind: "chunk", pane: "list" }, "replace")}>Individual recordings</Button>
         </div>
         <Label className="text-xs text-muted-foreground">Day
           <Input type="date" aria-label="Day" value={route.day} list="recording-days" className="w-full max-w-40" onChange={(event) => onRoute({ day: event.target.value, selectedId: null, pane: "list" }, "replace")} />

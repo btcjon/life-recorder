@@ -162,9 +162,34 @@ export function eventRange(block: DisplayBlock): string {
   return startLocal + " – " + endLocal;
 }
 
+export type GroupSourceKind = "manual" | "topic" | "meeting" | "time";
+
+export function groupSourceKind(block: DisplayBlock): GroupSourceKind {
+  if (block.source === "manual") return "manual";
+  if (block.source === "topic") return "topic";
+  if (block.source === "meeting") return "meeting";
+  return "time";
+}
+
+export function groupSourceLabel(block: DisplayBlock): string {
+  const kind = groupSourceKind(block);
+  if (kind === "manual") return "Saved group";
+  if (kind === "topic") return "AI topic (inferred)";
+  if (kind === "meeting") return "Meeting";
+  return "Time group";
+}
+
+export function groupSourceDetail(block: DisplayBlock): string {
+  const kind = groupSourceKind(block);
+  if (kind === "topic") return "AI topic (inferred). Not a confirmed conversation.";
+  if (kind === "time") return "Time group · no verified topic";
+  return groupSourceLabel(block);
+}
+
 export function eventTitle(block: DisplayBlock): string {
-  if (block.source === "manual" && block.title) return block.title;
-  return "Event · " + eventRange(block);
+  const title = (block.title || "").trim();
+  if (title) return title;
+  return groupSourceLabel(block);
 }
 
 export function summaryStatus(block: DisplayBlock): string {
@@ -209,10 +234,12 @@ export function groupMembers(payload: DayPayload, block: DisplayBlock, showQuiet
     .sort(byStart);
 }
 
+export function isEventBlock(block: DisplayBlock): boolean {
+  return block.kind === "event" || (!block.kind && !block.chunk_id && (block.chunk_ids || []).length > 0);
+}
+
 export function qualifiesAsGroup(block: DisplayBlock, members: Chunk[]): boolean {
-  if (block.kind !== "event" || !members.length) return false;
-  if (block.source === "manual") return true;
-  return members.filter((chunk) => (chunk.transcript || "").trim()).length >= 2;
+  return isEventBlock(block) && members.length > 0;
 }
 
 export function buildRecordingList(payload: DayPayload | null, options: ListOptions): ListRow[] {
@@ -221,12 +248,20 @@ export function buildRecordingList(payload: DayPayload | null, options: ListOpti
   if (options.groups) {
     const needle = options.query.trim().toLowerCase();
     const rows: ListRow[] = [];
+    const byId = new Map((payload.chunks || []).map((chunk) => [chunk.id, chunk]));
     for (const block of payload.display_blocks || []) {
-      if (block.kind !== "event") continue;
+      if (!isEventBlock(block)) {
+        const chunkId = block.chunk_id || "";
+        const chunk = chunkId ? byId.get(chunkId) : undefined;
+        if (!chunk || isHiddenQuiet(chunk, options.showQuiet, showPending)) continue;
+        if (needle && !chunkMatches(chunk, needle)) continue;
+        rows.push({ type: "chunk", key: chunk.id, chunk });
+        continue;
+      }
       const members = groupMembers(payload, block, options.showQuiet, showPending);
       if (!qualifiesAsGroup(block, members)) continue;
       const match = members.find((chunk) => chunkMatches(chunk, needle)) || null;
-      const titleHit = needle && (block.title || "").toLowerCase().includes(needle);
+      const titleHit = !!needle && [block.title, block.preview].some((value) => (value || "").toLowerCase().includes(needle));
       if (needle && !match && !titleHit) continue;
       const id = block.id || (block.chunk_ids || []).join("-");
       rows.push({ type: "group", key: id, block: { ...block, id }, members, matchId: match?.id || null });

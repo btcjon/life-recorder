@@ -33,7 +33,7 @@ beforeEach(() => {
   const storage = { getItem: () => null, setItem: () => undefined, removeItem: () => undefined };
   Object.defineProperty(window, "localStorage", { configurable: true, value: storage });
   Object.defineProperty(window, "sessionStorage", { configurable: true, value: storage });
-  history.replaceState(null, "", "/ui-v2/?day=2026-10-04");
+  history.replaceState(null, "", "/ui-v2/?day=2026-10-04&groups=0");
   Object.defineProperty(window, "matchMedia", { configurable: true, value: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }) });
   Object.defineProperty(window, "ResizeObserver", { configurable: true, value: class { observe() {} unobserve() {} disconnect() {} } });
   Element.prototype.getAnimations = () => [];

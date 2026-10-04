@@ -18,6 +18,8 @@ import {
   eventRange,
   eventSources,
   eventTimeRange,
+  eventTitle,
+  groupSourceDetail,
   groupBounds,
   groupLabel,
   groupTurns,
@@ -187,18 +189,18 @@ function EventContext({ event, payload, query = "", onPlayItem, onOpenSource }: 
 }
 
 function GroupDetail({ group, payload, query = "", client, onPlayItem, onOpenSource, onReload, readOnly }: DetailProps & { group: { block: DisplayBlock; members: Chunk[] } }) {
-  const saved = group.block.source === "manual";
+  const sources = group.members.length;
   return (
     <article id="recording-detail" className="h-full min-w-0 overflow-y-auto p-4 pb-8 [overflow-wrap:anywhere] md:p-8" tabIndex={-1}>
       <div className="grid min-w-0 max-w-3xl gap-4">
         <header>
-          <h2 className="text-xl font-semibold tracking-tight">{saved && group.block.title ? group.block.title : saved ? "Saved group" : "Suggested group"}</h2>
-          <p className="text-sm text-muted-foreground">{saved ? "Saved group" : "Suggested group, not an established conversation"} · {eventRange(group.block)}</p>
+          <h2 className="text-xl font-semibold tracking-tight">{eventTitle(group.block)}</h2>
+          <p className="text-sm text-muted-foreground">{groupSourceDetail(group.block)} · {eventRange(group.block)} · {sources} source {sources === 1 ? "recording" : "recordings"}</p>
           {group.block.day_portion ? <p className="text-xs text-muted-foreground">This day shows part of the saved boundaries.</p> : null}
         </header>
         {group.block.summary_state === "ready" && group.block.summary ? <p className="text-sm">{group.block.summary}</p> : null}
-        <BoundaryEditor block={group.block} payload={payload} client={client} onReload={onReload} readOnly={readOnly} />
         <SourceTranscripts members={group.members} query={query} onPlayItem={onPlayItem} onOpenSource={onOpenSource} />
+        <BoundaryEditor block={group.block} payload={payload} client={client} onReload={onReload} readOnly={readOnly} />
       </div>
     </article>
   );
@@ -219,7 +221,7 @@ function BoundaryEditor({
 }) {
   const manual = block.source === "manual";
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState(manual ? block.title || "" : "");
+  const [title, setTitle] = useState(block.title || "");
   const [start, setStart] = useState(block.start_chunk_id || "");
   const [end, setEnd] = useState(block.end_chunk_id || "");
   const [error, setError] = useState("");
@@ -228,7 +230,7 @@ function BoundaryEditor({
   const writeBusy = useRef(false);
   const options = (payload?.chunks || []).filter((chunk) => chunk.started_local || chunk.started);
   useEffect(() => {
-    setTitle(manual ? block.title || "" : "");
+    setTitle(block.title || "");
     setStart(block.start_chunk_id || "");
     setEnd(block.end_chunk_id || "");
     setError("");
@@ -270,7 +272,7 @@ function BoundaryEditor({
   return (
     <section className="grid gap-2" aria-label="Group boundaries">
       <p className="text-xs text-muted-foreground">Boundaries stay on the saved recordings. This does not create a combined playback.</p>
-      <Button type="button" size="sm" variant="outline" className="touch-target w-fit" disabled={readOnly || saving || conflict} aria-label={manual ? "Edit event title and boundaries" : "Edit this suggested event"} onClick={() => setOpen((value) => !value)}>
+      <Button type="button" size="sm" variant="outline" className="touch-target w-fit" disabled={readOnly || saving || conflict} aria-label={manual ? "Edit event title and boundaries" : "Edit title and boundaries"} onClick={() => setOpen((value) => !value)}>
         {open ? "Close" : "Edit title and boundaries"}
       </Button>
       {open ? (

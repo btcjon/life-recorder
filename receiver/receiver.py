@@ -42,6 +42,7 @@ import vad as vad_mod
 import voice_id
 import speaker_identity
 import timeline
+import context_grouping
 import topic_analysis
 import boundary_suggestions
 import place_context
@@ -806,10 +807,9 @@ class Inbox:
                 "speakers": None,
             })
         with self.connect() as db:
-            all_display = event_edits._chunks(db.execute('SELECT id,started,duration,transcript FROM chunks').fetchall())
             day_ids = {item['id'] for item in chunks}
             display_blocks = []
-            for block in event_edits.overlay(all_display, event_edits.load(db)):
+            for block in context_grouping.project_blocks(db):
                 ids = block.get('chunk_ids') or [block.get('chunk_id')]
                 visible = [identifier for identifier in ids if identifier in day_ids]
                 if not visible:

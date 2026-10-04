@@ -38,7 +38,7 @@ describe("recordings visibility", () => {
     expect(provided.filter((row) => row.type === "chunk")).toHaveLength(2);
   });
 
-  it("defaults to individual recordings and exposes groups only as a secondary view, never speech rows", () => {
+  it("keeps the flat list explicit and does not turn speech events into sidebar rows", () => {
     const payload: DayPayload = {
       chunks: [
         chunk({ id: "a", transcript: "one", duration: 30 }),
@@ -54,6 +54,32 @@ describe("recordings visibility", () => {
     expect(flat.filter((row) => row.type === "chunk")).toHaveLength(2);
     expect(flat.some((row) => row.type === "group")).toBe(false);
     expect(grouped.map(row => row.key)).toEqual(["evt"]);
+  });
+
+  it("keeps topic singletons and uncovered chunk blocks, including quiet and pending when asked", () => {
+    const payload: DayPayload = {
+      chunks: [
+        chunk({ id: "topic-only", transcript: "solo topic", started_local: "2026-10-04 09:00" }),
+        chunk({ id: "quiet", status: "complete", transcript: "", speaker_turn_count: 0, started_local: "2026-10-04 09:10" }),
+        chunk({ id: "pending", status: "pending", transcript: "", audio_playable: false, started_local: "2026-10-04 09:11" }),
+        chunk({ id: "loose", transcript: "uncovered speech", started_local: "2026-10-04 09:12" }),
+      ],
+      display_blocks: [
+        { kind: "event", id: "solo", source: "topic", title: "Solo topic", chunk_ids: ["topic-only"] },
+        { kind: "chunk", chunk_id: "quiet" },
+        { kind: "chunk", chunk_id: "pending" },
+        { kind: "chunk", chunk_id: "loose" },
+      ],
+    };
+    const shown = buildRecordingList(payload, { query: "", showQuiet: true, showPending: true, groups: true });
+    expect(shown.map((row) => row.key)).toEqual(["solo", "quiet", "pending", "loose"]);
+    expect(shown[0]).toMatchObject({ type: "group", block: { title: "Solo topic", source: "topic" } });
+    const filtered = buildRecordingList(payload, { query: "", showQuiet: false, showPending: false, groups: true });
+    expect(filtered.map((row) => row.key)).toEqual(["solo", "loose"]);
+    const titled = buildRecordingList(payload, { query: "Solo topic", showQuiet: false, groups: true });
+    expect(titled.map((row) => row.key)).toEqual(["solo"]);
+    const passage = buildRecordingList(payload, { query: "uncovered", showQuiet: false, groups: true });
+    expect(passage.map((row) => row.key)).toEqual(["loose"]);
   });
 
   it("preserves saved group IDs and picks the actual matching source text", () => {

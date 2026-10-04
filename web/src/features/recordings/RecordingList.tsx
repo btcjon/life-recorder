@@ -7,6 +7,9 @@ import {
   audioStateLabel,
   clockLabel,
   eventRange,
+  eventTitle,
+  groupSourceKind,
+  groupSourceLabel,
   hasPlayableRows,
   preview,
   recordedLength,
@@ -38,29 +41,32 @@ export function RecordingList({
           if (row.type === "group") {
             const active = selectedKind === "group" && selectedId === row.key;
             const seconds = row.members.reduce((sum, chunk) => sum + (Number(chunk.duration) || 0), 0);
-            const kind = row.block.source === "manual" ? "Saved group" : "Suggested group";
+            const label = groupSourceLabel(row.block);
+            const matched = row.members.find((chunk) => chunk.id === row.matchId);
             return (
               <div key={row.key} className="min-w-0 rounded-lg border p-2">
                 <Button id={"recording-" + row.key} type="button" variant={active ? "secondary" : "ghost"} className="recording-row touch-target h-auto w-full justify-start whitespace-normal text-left" aria-current={active ? "true" : undefined} onClick={() => onSelectGroup(row.key)}>
                   <span className="min-w-0">
-                    <span className="block font-medium">{row.block.source === "manual" && row.block.title ? row.block.title : kind}</span>
-                    <span className="block text-xs text-muted-foreground">{kind} · {eventRange(row.block)} · {row.members.length} recordings · {recordedLength(seconds)}</span>
-                    <span className="block truncate text-xs text-muted-foreground">{preview(row.members.find((chunk) => chunk.id === row.matchId)?.transcript || row.block.preview || row.members.find((chunk) => chunk.transcript)?.transcript)}</span>
+                    <span className="block font-medium">{eventTitle(row.block)}</span>
+                    <span className="block text-xs text-muted-foreground">{label} · {eventRange(row.block)} · {row.members.length} recordings · {recordedLength(seconds)}</span>
+                    <span className="block truncate text-xs text-muted-foreground">{preview(matched?.transcript || row.block.preview || row.members.find((chunk) => chunk.transcript)?.transcript)}</span>
                   </span>
                 </Button>
                 <details className="mt-1 px-1">
                   <summary className="touch-target cursor-pointer text-xs text-muted-foreground">Source recordings</summary>
-                  <ul className="grid gap-1" aria-label="Source recordings">
+                  <ul className="grid gap-1" aria-label={"Source recordings for " + eventTitle(row.block)}>
                   {row.members.map((chunk) => (
                     <li key={chunk.id}>
-                      <button type="button" className="touch-target w-full truncate text-left text-xs text-muted-foreground underline" onClick={() => onSelectChunk(chunk.id)}>
+                      <button id={"recording-" + chunk.id} type="button" className="touch-target w-full truncate text-left text-xs text-muted-foreground underline" aria-label={"Open source recording " + (chunk.started_local || chunk.started || chunk.id)} onClick={() => onSelectChunk(chunk.id)}>
                         {chunk.started_local || chunk.started || chunk.id}
                       </button>
+                      {audioStateLabel(chunk) ? <span className="block text-xs text-muted-foreground">{audioStateLabel(chunk)}</span> : null}
                     </li>
                   ))}
                   </ul>
                 </details>
-                {row.block.source === "manual" ? <Badge variant="secondary">Saved title</Badge> : <Badge variant="outline">Suggested group</Badge>}
+                <Badge variant={groupSourceKind(row.block) === "manual" ? "secondary" : "outline"}>{label}</Badge>
+                {groupSourceKind(row.block) === "time" ? <Badge variant="outline">No verified topic</Badge> : null}
               </div>
             );
           }

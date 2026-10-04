@@ -30,6 +30,13 @@ class ViewerFeatureBrowserTests(unittest.TestCase):
                            transcript=f"Synthetic words in clip {index}")
                 for index in range(3)
             ]
+            # These captures are one phone conversation. The generic helper
+            # otherwise gives each clip a different random device; context
+            # grouping must not merge independent devices by time proximity.
+            with inbox.connect() as db:
+                device = db.execute('SELECT device FROM chunks WHERE id=?', (clips[0],)).fetchone()[0]
+                for clip in clips[1:]:
+                    db.execute('UPDATE chunks SET device=? WHERE id=?', (device, clip))
             for clip in clips[:2]:
                 _label(inbox, clip, person["id"])
             server = viewer.start_viewer(inbox, port=0)

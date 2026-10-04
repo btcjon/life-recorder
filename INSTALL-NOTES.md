@@ -4,6 +4,38 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-04 missing speaker controls repair
+
+The immutable release changed the default relative FluidAudio path. The existing
+job had an explicit Parakeet CLI path but no explicit diarization CLI, so health
+reported speaker processing disabled and 42 new recordings remained pending.
+After a consistent private SQLite/plist/source backup and an exact-command dry
+run, only `--diarization-cli` and that same existing CLI path were added to the
+loaded job's plist. The same job was reloaded (observed PID 40368). Receiver/UI
+source revision `c4395d0784e3a99be9ab29afb7e02ac2cab8bada`, manifest pin and all
+other configuration remained unchanged. Rollback is the preserved plist only;
+do not restore the old database over subsequent recordings.
+
+All 42 pending recordings reached terminal outcomes: 27 success, 12 low coverage,
+and 3 no speech. The reported recording has eight stored/API speaker turns. Its
+rendered speaker bubble opens the Identify speaker dialog and closes without a
+save; sample enrollment remains separately unchecked. Existing confirmed labels,
+voice samples and people have identical whole-row fingerprints. No older clip
+was eligible for re-extraction. All 408 Python tests passed. Live integrity,
+92/92 transcript indexes, event IDs, cursor key, source attestation, listener
+scope, original-audio range access and human/machine authentication checks passed.
+The receiver error log had no new bytes during verification.
+
+Intermittent audible playback is not established as repaired. The retained AAC
+decodes fully to 60 seconds. Earlier muted browser measurements showed slow
+audio-clock advancement in both React and a standalone audio element, without
+source resets or player errors. A later controlled eight-second test advanced
+both original playback and synthetic PCM by about 7.96 seconds with readyState 4
+and no error. High Mac resource usage is an observed condition, not a proven
+cause. A specific audible cutoff timestamp is still needed to distinguish source
+capture gaps from a browser/output problem. No recording or playback source was
+replaced, and no global browser/audio settings were changed.
+
 ## 2026-10-04 context and premium viewer completion, 14:19 UTC
 
 Both accepted Astra plans are implemented. Context source was committed and

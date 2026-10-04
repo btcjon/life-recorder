@@ -4,6 +4,48 @@ This file is a point-in-time journal. It is not the architecture source of truth
 
 Two statements later in this journal described the 2026-09-19 install and are no longer current: source audio is retained for playback and diarization rather than deleted after transcription, and this Mac transcribes with FluidAudio Parakeet rather than Homebrew `whisper-cli`.
 
+## 2026-10-04 transcript-first viewer rollout
+
+Implemented the accepted Astra plan and deployed source/UI revision
+`5a37b2f4bbb80fcebd1ec5caf46ec0d1ef6a7c1b`. Recordings is the flat default;
+selection opens full text without playback. Speaker Name and Play are separate.
+Groups show ordered source transcripts and open the actual source recording;
+speech-only/enhanced playback is explicitly scoped under Audio options. Playback
+survives selection and Back. Context and technical views remain secondary.
+
+One bounded Grok worker returned partial; the lead completed repairs and tests.
+Astra's conditional final review requested three acceptance checks: the complete
+320px walkthrough, final backend results, and exhausted speaker-read retries
+recovering through Refresh without restarting audio. All three passed. Synthetic
+desktop/320/390px browser checks covered literal search highlighting, long text
+and names, naming without playback or enrollment, explicit derived sources,
+and Back focus. No real speaker labels were changed for verification.
+
+Verification: 71 frontend tests and 409 Python tests passed; typecheck, lint,
+production build and diff checks passed. The immutable release contains 45
+manifest-verified files, including five generated frontend assets built from 52
+committed authored inputs and 32 private licensed inputs. Generated assets total
+868,553 bytes. Packaging used a clean local copy of this exact commit, leaving
+unrelated Dropbox conflict copies untouched. No public push.
+
+A consistent private database/plist/source backup precedes deployment. Only the
+existing job's source argument and manifest pin changed; the explicit diarization
+CLI and all other settings were preserved. The reloaded job has observed PID
+69761. Live health and source attestation passed; upload listens on `*:8766`,
+viewer on `127.0.0.1:8767`. Integrity, 98 completed recordings, 92/92 transcript
+indexes, event IDs and cursor key are preserved. Existing whole rows for one
+confirmed assignment, one person and zero voice samples are unchanged. Original
+audio range access returned 206; human routes enforce 200/401 and machine
+credentials receive 403 on human UI/audio/context and mutation routes. All five
+served asset hashes match the frozen release; premium remains default and legacy
+remains available. No new receiver error-log bytes during bounded verification.
+
+Rollback changes only the source path and manifest pin to the previous immutable
+release preserved in the private safety backup. Never replace the live database
+with the backup over newer uploads. No iOS build, microphone test, voice enrollment
+or new schema migration was part of this rollout. Intermittent audible playback
+and historical speaker-name recovery remain outside this UI result.
+
 ## 2026-10-04 missing speaker controls repair
 
 The immutable release changed the default relative FluidAudio path. The existing

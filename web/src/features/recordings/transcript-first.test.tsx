@@ -108,7 +108,7 @@ describe("transcript-first workflow", () => {
     render(detail({ chunk: { ...first, status: "pending", speakers: undefined, diarization_status: "pending" } }));
     expect(screen.getByText("Processing transcript")).toBeTruthy();
     expect(screen.getByText(first.transcript!)).toBeTruthy();
-    expect(screen.getByText("Speaker analysis pending")).toBeTruthy();
+    expect(screen.getByText("Speaker analysis blocked by transcription")).toBeTruthy();
   });
 
   it("opens one-click full text from the flat list with no audio fetch and no day-wide review burst", async () => {

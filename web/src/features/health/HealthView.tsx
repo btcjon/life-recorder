@@ -2,10 +2,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ContextClient } from "../context/contracts";
+import type { HealthReport } from '../../api/types';
 
-export type HealthSnapshot = {
-  processing?: { pending_count?: number; pending?: number; attention_count?: number; needs_attention?: number; delayed?: boolean; oldest_pending_age_seconds?: number; last_completed_at?: number };
-  queue?: HealthSnapshot['processing'];
+export type HealthSnapshot = HealthReport & {
+  queue?: HealthReport['processing'];
   storage?: { low_space?: boolean; original_audio_bytes?: number; audio_usage_complete?: boolean; available_bytes?: number };
   stages?: Record<string, { enabled?: boolean; counts?: Record<string, number>; status?: { state?: string; error_code?: string } }>;
   runtime?: { source_revision?: string; viewer_ui?: { state?: string; delivery?: string; asset_count?: number } };
@@ -14,6 +14,12 @@ export type HealthSnapshot = {
 export function healthDetails(report: HealthSnapshot) {
   const queue = report.processing || report.queue || {}, storage = report.storage || {};
   const details = [`Pending: ${Number(queue.pending_count ?? queue.pending ?? 0)}`, `Needs attention: ${Number(queue.attention_count ?? queue.needs_attention ?? 0)}`];
+  const processing = report.processing;
+  details.unshift(processing?.last_completed_at ? `Last success: ${new Date(processing.last_completed_at * 1000).toLocaleString()}` : 'Last success unavailable');
+  details.push(`Engine: ${processing?.engine_ready === true ? 'ready' : processing?.engine_ready === false ? 'unavailable' : 'not checked'}`);
+  if (processing?.stalled) details.push('Processing stalled');
+  if (processing?.active_operation) details.push(`Active operation: ${processing.active_operation}`);
+  if (processing?.backlog_count != null) details.push(`Backlog: ${processing.backlog_count} recordings · ${Math.round((processing.backlog_duration_seconds || 0) / 60)} minutes`);
   if (queue.delayed || Number(queue.oldest_pending_age_seconds || 0) > 600) details.push("Processing delayed — inspect pending recordings");
   if (storage.low_space) details.push("Low disk space — free storage on your Mac");
   if (storage.original_audio_bytes != null) details.push(`Original audio: ${(storage.original_audio_bytes / 1048576).toFixed(1)} MB${storage.audio_usage_complete ? "" : " (partial count)"}`);
@@ -24,7 +30,11 @@ export function healthDetails(report: HealthSnapshot) {
   if (report.runtime?.viewer_ui) details.push(`Viewer bundle: ${report.runtime.viewer_ui.state || "unknown"} · ${report.runtime.viewer_ui.asset_count || 0} assets`);
   return details;
 }
-export function HealthView({ client }: { client: ContextClient }) {
+type SharedHealth = { report: HealthSnapshot | null; error: string; loading: boolean; refresh: () => void };
+export function HealthView({ client, shared }: { client: ContextClient; shared?: SharedHealth }) {
+  return shared ? <HealthDisplay {...shared} /> : <StandaloneHealth client={client} />;
+}
+function StandaloneHealth({ client }: { client: ContextClient }) {
   const [report, setReport] = useState<HealthSnapshot | null>(null), [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const generation = useRef(0), abortRef = useRef<AbortController | null>(null);
@@ -36,8 +46,11 @@ export function HealthView({ client }: { client: ContextClient }) {
     finally { if (id === generation.current) setLoading(false); }
   }, [client]);
   useEffect(() => { const requests = generation; void load(); return () => { requests.current++; abortRef.current?.abort(); }; }, [load]);
+  return <HealthDisplay report={report} error={error} loading={loading} refresh={() => void load()} />;
+}
+function HealthDisplay({report, error, loading, refresh}: SharedHealth) {
   return <div id="health-view" className="h-full overflow-y-auto p-3 md:p-5"><div className="mx-auto max-w-4xl space-y-5">
-    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">Receiver health</h2><Button disabled={loading} variant="outline" onClick={() => void load()}>{loading ? "Checking…" : "Refresh health"}</Button></div>
+    <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-xl font-semibold">Receiver health</h2><Button disabled={loading} variant="outline" onClick={refresh}>{loading ? "Checking…" : "Refresh health"}</Button></div>
     <p className="text-sm text-muted-foreground">Uploaded, pending, retrying, quiet and unavailable are different states. This screen reads status; it does not retry processing or recompute voice diagnostics.</p>
     {error && <p role="alert" className="text-destructive">{error}</p>}
     {!report && !error && <p>Loading processing status…</p>}

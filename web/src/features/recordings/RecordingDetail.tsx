@@ -484,7 +484,7 @@ function ChunkDetail({ chunk, payload, detailMode, client, onPlaySpan, onPlayFul
           </Alert>
         ) : stateLabel ? <p role="status" className="text-sm">{stateLabel}</p> : null}
         {audioRetentionLabel(chunk) ? <p role="status" className="text-sm">Audio no longer retained</p> : null}
-        {(speakerPendingLabel(chunk) || (!Array.isArray(chunk.speakers) && chunk.status === "complete")) ? <p role="status" className="text-sm">Speaker analysis pending</p> : null}
+        {speakerPendingLabel(chunk) ? <p role="status" className="text-sm">{speakerPendingLabel(chunk)}</p> : null}
         <HighlightedTranscript text={chunk.transcript || ""} query={query} label="Transcript" />
         <div id="speaker-controls" tabIndex={-1} className="grid gap-2 outline-none" aria-label="Speakers">
           <h3 className="text-sm font-medium">Speakers</h3>

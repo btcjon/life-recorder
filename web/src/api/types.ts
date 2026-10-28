@@ -15,6 +15,7 @@ export type SpeakerTurn = {
 };
 
 export type Chunk = {
+  speaker_analysis_state?: 'blocked by transcription' | 'queued' | 'running' | 'failed' | 'complete';
   id: string;
   transcript?: string;
   speakers?: SpeakerTurn[];
@@ -126,6 +127,8 @@ export type DayPayload = {
   people?: Person[];
   pending?: number;
   errors?: number;
+  day_processing?: { pending?: number; errors?: number; needs_attention?: number };
+  global_processing?: { pending?: number; errors?: number; needs_attention?: number };
   activity_shadow?: { hold_vad_positive?: number };
   identity_revision?: number;
 };
@@ -251,7 +254,11 @@ export type LabelTurnsBody = {
 };
 
 export type HealthReport = {
-  processing?: { pending_count?: number; pending?: number; attention_count?: number; needs_attention?: number };
+  checked_at?: number;
+  processing?: { pending_count?: number; pending?: number; attention_count?: number; needs_attention?: number;
+    engine_ready?: boolean | null; engine_checked_at?: number; active_operation?: string | null;
+    last_completed_at?: number; last_success_at?: number; backlog_count?: number;
+    backlog_duration_seconds?: number; stalled?: boolean; delayed?: boolean; oldest_pending_age_seconds?: number };
   queue?: { pending_count?: number; pending?: number; attention_count?: number; needs_attention?: number };
 };
 

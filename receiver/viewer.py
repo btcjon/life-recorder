@@ -2699,9 +2699,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
         if path.startswith("/v1/audio/"):
             chunk_id = path.removeprefix("/v1/audio/")
             row = self._inbox().receipt(chunk_id)
-            if not row or row["status"] != "complete" or row["audio_state"] != "present":
+            if not row or row["audio_state"] != "present":
                 return self._json(404, {"error": "Audio unavailable"})
             audio = Path(row["path"])
+            try:
+                audio.resolve().relative_to(self._inbox().audio.resolve())
+            except (OSError, ValueError):
+                return self._json(404, {"error": "Audio unavailable"})
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
             return self._send_audio(audio, include_body=False)
@@ -2777,9 +2781,13 @@ class ViewerHandler(BaseHTTPRequestHandler):
         if path.startswith("/v1/audio/"):
             chunk_id = path.removeprefix("/v1/audio/")
             row = self._inbox().receipt(chunk_id)
-            if not row or row["status"] != "complete" or row["audio_state"] != "present":
+            if not row or row["audio_state"] != "present":
                 return self._json(404, {"error": "Audio unavailable"})
             audio = Path(row["path"])
+            try:
+                audio.resolve().relative_to(self._inbox().audio.resolve())
+            except (OSError, ValueError):
+                return self._json(404, {"error": "Audio unavailable"})
             if not audio.is_file():
                 return self._json(404, {"error": "Audio unavailable"})
             return self._send_audio(audio, include_body=True)

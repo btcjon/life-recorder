@@ -65,6 +65,24 @@ class ProcessingRetryViewerTests(ViewerCase):
         self.assertEqual(tuple(row), ("needs_attention", 9))
         self.assertFalse(self.inbox.processing_record(self.chunk_id)["retry_eligible"])
 
+    def test_retained_incomplete_audio_get_head_ranges_and_boundaries(self):
+        path = f'/v1/audio/{self.chunk_id}'
+        auth = {'Authorization': 'Bearer ' + self.token}
+        for state in ('pending', 'needs_attention'):
+            with self.inbox.connect() as db:
+                db.execute('UPDATE chunks SET status=? WHERE id=?', (state, self.chunk_id))
+            status, raw, _ = self.request('GET', path, auth)
+            self.assertEqual((status, raw), (200, b'kept-audio'))
+            status, raw, _ = self.request('HEAD', path, auth)
+            self.assertEqual((status, raw), (200, b''))
+            status, raw, _ = self.request('GET', path, {**auth, 'Range': 'bytes=1-3'})
+            self.assertEqual((status, raw), (206, b'ept'))
+        self.assertEqual(self.request('GET', path, {})[0], 401)
+        with mock.patch.dict('os.environ', {'LIFE_RECORDER_AGENT_CLIENT_IDS': self.client_id}):
+            self.assertEqual(self.request('GET', path, {'Host': 'lr.genr8ive.ai', 'Cf-Access-Jwt-Assertion': self.machine_token()})[0], 403)
+        self.audio.unlink()
+        self.assertEqual(self.request('GET', path, auth)[0], 404)
+
     def test_retry_requires_human_auth_and_empty_body(self):
         status, _, _ = self.request("POST", f"/v1/chunks/{self.chunk_id}/retry", {
             "Content-Type": "application/json",

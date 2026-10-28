@@ -179,6 +179,7 @@ def parse_parakeet_output(path: Path) -> tuple[str, dict]:
 
 
 def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tuple[str, dict]:
+    from processing_runtime import operation
     if not config.ffmpeg:
         raise ValueError("ffmpeg is required")
     token = uuid.uuid4().hex
@@ -188,9 +189,10 @@ def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tu
     lease = None
     try:
         try:
-            lease = decoded_audio.acquire(
-                config.ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run,
-            )
+            with operation(None, 'decode'):
+                lease = decoded_audio.acquire(
+                    config.ffmpeg, Path(row["path"]), str(row["id"]), work, run=subprocess.run,
+                )
         except decoded_audio.EmptyDecodeError as error:
             raise ProcessingFailure("decode", "decode_empty", "transient") from error
         if not _wav_usable(lease.path):
@@ -206,9 +208,10 @@ def transcribe_chunk(row, config: AsrConfig, work: Path, clean_transcript) -> tu
                 "--language", "en",
                 "--output-json", str(result_file),
             ]
-            subprocess.run(
-                argv, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600,
-            )
+            with operation(None, 'engine_transcription'):
+                subprocess.run(
+                    argv, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600,
+                )
             text, summary = parse_parakeet_output(result_file)
             cleaned = clean_transcript(text).strip()
             provenance = {

@@ -212,7 +212,10 @@ export function identityFailureCopy(error: unknown): string {
 export function healthSummary(report: HealthReport | null, failed: boolean): string {
   if (failed || !report) return "Processing status unavailable. Check that your Mac receiver is reachable.";
   const queue = report.processing || report.queue || {};
+  const processing = report.processing;
   const pending = Number(queue.pending_count ?? queue.pending ?? 0);
   const attention = Number(queue.attention_count ?? queue.needs_attention ?? 0);
-  return `Pending: ${pending} · Needs attention: ${attention}`;
+  const warning = processing?.engine_ready === false ? 'Engine unavailable · ' : processing?.stalled ? 'Processing stalled · ' : '';
+  const success = processing?.last_completed_at ? ` · Last success: ${new Date(processing.last_completed_at * 1000).toLocaleString()}` : '';
+  return `${warning}Pending: ${pending} · Needs attention: ${attention}${success}`;
 }

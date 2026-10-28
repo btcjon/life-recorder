@@ -48,6 +48,7 @@ import boundary_suggestions
 import place_context
 import context_observations
 import mac_context
+import processing_runtime
 from agent_api.errors import AgentError
 
 MAX_UPLOAD = 32 * 1024 * 1024
@@ -174,6 +175,9 @@ class Inbox:
         self.health_source_identity = dict(_STARTUP_SOURCE_IDENTITY)
         self.health_source_revision = self.health_source_identity['revision']
         self.health_stages = {}
+        self.speaker_active_id = None
+        self.processing_runtime = {'engine_ready': None, 'engine_checked_at': None,
+                                   'active_operation': None, 'engine_error': None}
         self.last_index_reconciled_at = None
         self._index_reconciliation_times = {}
         self.viewer_error = None
@@ -272,8 +276,8 @@ class Inbox:
                 db.execute("""INSERT INTO chunks
                     (id,sha256,device,started,duration,path,received,activity_version,activity_decision,
                      activity_coverage,activity_windows,activity_expected,activity_rms_dbfs,
-                     activity_peak_dbfs,activity_reason)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                     activity_peak_dbfs,activity_reason,audio_bytes)
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                     (chunk_id, digest, device, started, duration, str(dest), time.time(),
                      None if not activity else activity["version"],
                      None if not activity else activity["decision"],
@@ -282,7 +286,7 @@ class Inbox:
                      None if not activity else activity["expected"],
                      None if not activity else activity["rms_dbfs"],
                      None if not activity else activity["peak_dbfs"],
-                     None if not activity else activity["reason"]))
+                     None if not activity else activity["reason"], dest.stat().st_size))
                 # Optional context cannot roll back a durably accepted recording.
                 if observation_id:
                     db.execute('SAVEPOINT optional_place_binding')
@@ -604,7 +608,7 @@ class Inbox:
         with self.connect() as db:
             return db.execute("""SELECT id,device,started,duration,path,status,error,transcript,
                 word_count,engine,audio_state,audio_expires_at,audio_pinned,diarization_status,
-                error_code,error_stage,
+                error_code,error_stage,diarization_error,
                 activity_decision,vad_status FROM chunks ORDER BY started,id""").fetchall()
 
     def _blocks_for(self, db):
@@ -741,6 +745,10 @@ class Inbox:
                 "audio_expires_at": row["audio_expires_at"],
                 "audio_pinned": bool(row["audio_pinned"]),
                 "diarization_status": row["diarization_status"],
+                "speaker_analysis_state": ('blocked by transcription' if row['status'] != 'complete'
+                    else 'running' if row['id'] == self.speaker_active_id
+                    else 'failed' if row['diarization_error']
+                    else 'queued' if row['diarization_status'] == 'pending' else 'complete'),
                 "speaker_turn_count": turn_counts.get(row["id"], 0),
             })
         events = []
@@ -832,6 +840,11 @@ class Inbox:
             "intervals": intervals,
             "pending": pending,
             "errors": errors,
+            "day_processing": {"pending": sum(c['status'] == 'pending' for c in chunks),
+                               "needs_attention": sum(c['status'] == 'needs_attention' for c in chunks),
+                               "errors": sum(bool(c['error_code']) for c in chunks)},
+            "global_processing": {"pending": pending, "errors": errors,
+                                  "needs_attention": sum(r['status'] == 'needs_attention' for r in rows)},
             "speakers": None,
             "people": self.people(),
             "events": events,
@@ -1358,11 +1371,24 @@ def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpe
             engine=engine, ffmpeg=ffmpeg, model=model, whisper=whisper,
             mlx_command=mlx_command, mlx_model=mlx_model,
         )
+    next_preflight = 0
+    recent_run = 0
     while not stop.is_set():
+        if time.monotonic() >= next_preflight:
+            try:
+                with processing_runtime.operation(inbox, 'engine_preflight'):
+                    processing_runtime.preflight(config)
+                inbox.processing_runtime.update(engine_ready=True, engine_error=None)
+            except Exception:
+                inbox.processing_runtime.update(engine_ready=False, engine_error='engine_unavailable')
+            inbox.processing_runtime['engine_checked_at'] = time.time()
+            next_preflight = time.monotonic() + 60
+        if not inbox.processing_runtime['engine_ready']:
+            stop.wait(min(2, max(0, next_preflight - time.monotonic())))
+            continue
         try:
             with inbox.connect() as db:
-                row = db.execute("SELECT * FROM chunks WHERE status='pending' AND retry_at<=? ORDER BY started LIMIT 1",
-                                 (time.time(),)).fetchone()
+                row, recent_run = processing_runtime.next_recording(db, time.time(), recent_run)
         except sqlite3.Error:
             stop.wait(2)
             continue
@@ -1370,10 +1396,14 @@ def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpe
             stop.wait(2)
             continue
         try:
-            diarization_mod.refresh_decoded_pins(inbox)
-            text, provenance = transcribe(row, model, work, whisper, ffmpeg, mlx_command, mlx_model, config)
-            inbox.complete(row["id"], text, provenance)
-            diarization_mod.refresh_decoded_pins(inbox)
+            with processing_runtime.operation(inbox, 'source_access'):
+                Path(row['path']).stat()
+            with processing_runtime.operation(inbox, 'cache_maintenance'):
+                diarization_mod.refresh_decoded_pins(inbox)
+            with processing_runtime.operation(inbox, 'transcription'):
+                text, provenance = transcribe(row, model, work, whisper, ffmpeg, mlx_command, mlx_model, config)
+            with processing_runtime.operation(inbox, 'database_commit'):
+                inbox.complete(row["id"], text, provenance)
         except Exception as error:
             # Keep the audio. Store a safe code, never tool output or a transcript.
             record_processing_failure(inbox, row, error)
@@ -1418,11 +1448,8 @@ def main():
     if args.mlx_command and not Path(args.mlx_command).is_file():
         parser.error("--mlx-command must be an existing executable")
     engine = asr_mod.resolve_engine(args.engine, args.mlx_command, args.mlx_model)
-    if engine == "whisper" and args.model and (not args.model.is_file() or not args.whisper or not args.ffmpeg):
-        parser.error("Transcription requires an existing model, whisper-cli, and ffmpeg")
-    if engine == "parakeet":
-        if not args.ffmpeg or not Path(args.parakeet_cli).is_file() or not Path(args.parakeet_model_dir).is_dir():
-            parser.error("Parakeet requires ffmpeg, fluidaudiocli, and a local model directory")
+    # Missing processing artifacts must not prevent the receiver accepting uploads.
+    # The worker preflight reports unavailable tools without consuming clip attempts.
     if engine == "mlx" and (not args.ffmpeg or not args.mlx_command or not args.mlx_model):
         parser.error("MLX engine requires ffmpeg, --mlx-command, and --mlx-model")
     config = asr_mod.AsrConfig(
@@ -1439,9 +1466,7 @@ def main():
         context.load_cert_chain(args.cert, args.key)
         server.socket = context.wrap_socket(server.socket, server_side=True)
     stop = threading.Event()
-    transcribe_ok = bool(args.ffmpeg) and (
-        engine == "parakeet" or engine == "mlx" or (args.model and args.whisper)
-    )
+    transcribe_ok = bool(engine in ('parakeet', 'mlx') or args.model)
     inbox.health_stages = {
         "asr": transcribe_ok,
         "diarization": bool(args.ffmpeg and args.diarization_cli.is_file()),

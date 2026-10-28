@@ -104,7 +104,7 @@ describe("context-first sidebar", () => {
     await user.click(screen.getByRole("checkbox", { name: "Show pending processing" }));
     expect(document.getElementById("recording-pending")).toBeTruthy();
     expect(document.getElementById("recording-quiet")).toBeTruthy();
-    expect(screen.getByText("Processing transcript")).toBeTruthy();
+    expect(screen.getByText(/Processing transcript/)).toBeTruthy();
   });
 
   it("roundtrips secondary individual-recording navigation and original source links", async () => {

@@ -186,7 +186,7 @@ class RecoveryTests(unittest.TestCase):
             calls["n"] += 1
             return "hello once", {"engine": "parakeet", "model": "parakeet", "summary": {}}
 
-        with mock.patch.object(receiver_mod, "transcribe", side_effect=fake_transcribe):
+        with mock.patch.object(receiver_mod, "transcribe", side_effect=fake_transcribe), mock.patch('processing_runtime.preflight'):
             thread = threading.Thread(
                 target=receiver_mod.worker,
                 args=(self.inbox, stop, Path("/tmp/model"), "whisper", "ffmpeg"),

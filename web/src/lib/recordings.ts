@@ -59,9 +59,13 @@ export function audioRetentionLabel(chunk: Chunk): string {
 }
 
 export function speakerPendingLabel(chunk: Chunk): string {
-  if (chunk.voice_pending) return "Speaker analysis pending";
+  if (chunk.speaker_analysis_state) return 'Speaker analysis ' + chunk.speaker_analysis_state;
+  if (chunk.status === 'pending' || chunk.status === 'needs_attention') return 'Speaker analysis blocked by transcription';
   const status = chunk.diarization_status || chunk.diarization?.outcome || "";
-  if (status === "pending" || status === "running") return "Speaker analysis pending";
+  if (status === 'running') return 'Speaker analysis running';
+  if (status === 'failed' || status === 'error') return 'Speaker analysis failed';
+  if (status === 'complete' || status === 'success') return 'Speaker analysis complete';
+  if (chunk.voice_pending || status === 'pending') return 'Speaker analysis queued';
   return "";
 }
 
@@ -145,8 +149,9 @@ export function recordedLength(seconds: number): string {
 export function dayStatus(payload: DayPayload | null): string {
   if (!payload) return "";
   const issues: string[] = [];
-  if (payload.pending) issues.push(payload.pending + " pending");
-  if (payload.errors) issues.push(payload.errors + " errors");
+  const counts = payload.day_processing || payload;
+  if (counts.pending) issues.push(counts.pending + " pending");
+  if (counts.errors) issues.push(counts.errors + " errors");
   const hold = Number(payload.activity_shadow?.hold_vad_positive || 0);
   if (hold > 0) issues.push(hold + " hold/VAD disagreement");
   return issues.join(" · ");
@@ -435,7 +440,7 @@ export function toPlayableChunk(chunk: Chunk) {
   return {
     id: chunk.id,
     kind: "chunk" as const,
-    audioPlayable: !!chunk.audio_playable && (!chunk.status || chunk.status === "complete"),
+    audioPlayable: !!chunk.audio_playable,
     enhancedPlayable: false,
     label: chunk.started_local || chunk.started || "Recording",
     pinned: !!chunk.audio_pinned,

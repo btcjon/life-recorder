@@ -379,6 +379,7 @@ def worker(inbox, stop, cli: Path, ffmpeg: str) -> None:
                 AND diarization_retry_at<=? ORDER BY started LIMIT 1""", (time.time(),)).fetchone()
         if not row:
             stop.wait(3); continue
+        inbox.speaker_active_id = row['id']
         try:
             refresh_decoded_pins(inbox)
             neighbors = neighbor_rows(inbox, row)
@@ -391,6 +392,8 @@ def worker(inbox, stop, cli: Path, ffmpeg: str) -> None:
                     diarization_error=? WHERE id=?""",
                     (attempts, time.time() + min(3600, 30 * 2 ** min(attempts, 7)),
                      type(error).__name__, row["id"]))
+        finally:
+            inbox.speaker_active_id = None
 
 
 def refresh_decoded_pins(inbox) -> None:

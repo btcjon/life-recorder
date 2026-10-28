@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from 'node:url';
 
 const root = new URL("./src/", import.meta.url);
 const banned = [
@@ -22,7 +23,7 @@ function files(dir) {
 }
 
 const failures = [];
-for (const path of files(root.pathname)) {
+for (const path of files(fileURLToPath(root))) {
   const text = readFileSync(path, "utf8");
   for (const rule of banned) {
     if (rule.pattern.test(text)) failures.push(`${path}: ${rule.message}`);
@@ -32,4 +33,4 @@ if (failures.length) {
   console.error(failures.join("\n"));
   process.exit(1);
 }
-console.log(`linted ${files(root.pathname).length} source files`);
+console.log(`linted ${files(fileURLToPath(root)).length} source files`);

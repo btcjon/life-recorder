@@ -146,6 +146,16 @@ def snapshot(inbox, device_id=None, now=None):
         # The phone receives only its own queue facts, never receiver-wide totals.
         if device_id is not None:
             return result
+        backlog = db.execute("SELECT count(*),coalesce(sum(duration),0),min(received) FROM chunks WHERE status!='complete'").fetchone()
+        queue.update(backlog_count=backlog[0], backlog_duration_seconds=backlog[1],
+                     last_success_at=queue['last_completed_at'])
+        queue['stalled'] = bool(backlog[2] is not None and now - backlog[2] >= 600
+                                and (queue['last_completed_at'] is None or now - queue['last_completed_at'] >= 900))
+        queue.update(getattr(inbox, 'processing_runtime', {}))
+        if queue.get('engine_ready') is False:
+            queue['state'] = 'engine_unavailable'
+        elif queue['stalled']:
+            queue['state'] = 'stalled'
         stages = {}
         for name, column in (("asr", "status"), ("diarization", "diarization_status"), ("vad", "vad_status")):
             counts = {r[0]: r[1] for r in db.execute(
@@ -192,7 +202,7 @@ def snapshot(inbox, device_id=None, now=None):
                            "source_identity": dict(inbox.health_source_identity),
                            "viewer_ui": dict(getattr(getattr(inbox, 'viewer_server', None),
                                                       'ui_status', {'state': 'not_configured'}))},
-                  state="needs_attention" if queue["needs_attention"] or storage["state"] != "ok"
+                  state="needs_attention" if queue["needs_attention"] or queue.get('stalled') or queue.get('engine_ready') is False or storage["state"] != "ok"
                   else "delayed" if queue["delayed"] else "ok")
     storage.update(original_audio_bytes=audio_bytes, pinned_count=pinned_count,
                    pinned_audio_bytes=pinned_bytes, audio_usage_complete=unknown == 0)

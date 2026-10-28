@@ -140,7 +140,7 @@ class EngineAndAsrTests(unittest.TestCase):
                                        parakeet_cli=Path("/bin/false"),
                                        parakeet_model_dir=Path(scratch))
             with mock.patch("asr.subprocess.run", side_effect=RuntimeError("bad asr")):
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(asr_mod.ProcessingFailure):
                     asr_mod.transcribe_chunk(row, config, inbox.root / "processing", lambda s: s)
             self.assertTrue(audio.exists())
             self.assertEqual(inbox.receipt(chunk_id)["status"], "pending")
@@ -358,7 +358,7 @@ class WorkerRetryTests(unittest.TestCase):
                     raise RuntimeError("transient")
                 return "once only", {"engine": "parakeet", "model": "parakeet", "summary": {"processingTimeSeconds": 0.2}}
 
-            with mock.patch.object(receiver_mod, "transcribe", side_effect=fake_transcribe):
+            with mock.patch.object(receiver_mod, "transcribe", side_effect=fake_transcribe), mock.patch('processing_runtime.preflight'):
                 thread = threading.Thread(
                     target=receiver_mod.worker,
                     args=(inbox, stop, Path("/tmp/model"), "whisper", "ffmpeg"),

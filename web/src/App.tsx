@@ -7,7 +7,7 @@ import { PeopleView } from "./features/people/PeopleView";
 import { RecordingsView } from "./features/recordings/RecordingsView";
 import { ReviewView } from "./features/review/ReviewView";
 import { ContextView } from "./features/context/ContextView";
-import { HealthView } from "./features/health/HealthView";
+import { HealthView, type HealthSnapshot } from "./features/health/HealthView";
 import { easternDay } from "./lib/identity";
 import { audioIdentity, type PlayableItem } from "./lib/playback";
 import { dayStatus } from "./lib/recordings";
@@ -31,6 +31,9 @@ export function App({ client }: { client: ApiClient }) {
   const [alert, setAlert] = useState(false);
   const [authFailed, setAuthFailed] = useState(false);
   const [health, setHealth] = useState("Checking processing status…");
+  const [healthReport, setHealthReport] = useState<HealthSnapshot | null>(null);
+  const [healthError, setHealthError] = useState('');
+  const [healthLoading, setHealthLoading] = useState(false);
   const routeRef = useRef(route);
   routeRef.current = route;
 
@@ -45,15 +48,30 @@ export function App({ client }: { client: ApiClient }) {
 
   const loadHealth = useCallback(async () => {
     const ticket = gate.start("health");
+    setHealthLoading(true);
     try {
       const report = await client.health(ticket.signal);
       if (!ticket.isCurrent()) return;
       setHealth(healthSummary(report, false));
+      setHealthReport(report);
+      setHealthError('');
     } catch (error) {
       if (isAbortError(error) || !ticket.isCurrent()) return;
       setHealth(healthSummary(null, true));
+      setHealthError('Processing status unavailable. Previous status may be stale.');
+    } finally {
+      if (ticket.isCurrent()) setHealthLoading(false);
     }
   }, [client, gate]);
+
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible') void loadHealth();
+    };
+    document.addEventListener('visibilitychange', refresh);
+    const timer = window.setInterval(refresh, 15000);
+    return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+  }, [loadHealth]);
 
   const loadDay = useCallback(async (day: string): Promise<boolean> => {
     if (!day || day !== routeRef.current.day) return false;
@@ -130,7 +148,7 @@ export function App({ client }: { client: ApiClient }) {
   } : null;
 
   return (
-    <AppShell view={route.view} health={authFailed ? "Open through the local launcher." : health} onView={(view) => {
+    <AppShell view={route.view} health={authFailed ? "Open through the local launcher." : (healthReport?.checked_at && Date.now() / 1000 - healthReport.checked_at > 45 ? 'Stale processing status · ' : '') + health} onView={(view) => {
       updateRoute({ view }, "push");
     }} player={
       <AudioPlayer
@@ -214,7 +232,7 @@ export function App({ client }: { client: ApiClient }) {
       ) : route.view === "context" ? (
         <ContextView client={client} day={route.day} onDay={(day) => updateRoute({ day, selectedId: null, pane: "list" })} />
       ) : route.view === "health" ? (
-        <HealthView client={client} />
+        <HealthView client={client} shared={{ report: healthReport, error: healthError || (healthReport?.checked_at && Date.now() / 1000 - healthReport.checked_at > 45 ? 'Processing status is stale.' : ''), loading: healthLoading, refresh: () => void loadHealth() }} />
       ) : null}
     </AppShell>
   );

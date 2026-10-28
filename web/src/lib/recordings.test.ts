@@ -18,8 +18,8 @@ describe("recordings visibility", () => {
     expect(visibleChunks([quiet, pending, attention, spoken], "", false).map((item) => item.id)).toEqual(["attention", "spoken"]);
     expect(visibleChunks([quiet, pending], "", true)).toHaveLength(1);
     expect(visibleChunks([quiet, pending], "", true, true)).toHaveLength(2);
-    expect(audioStateLabel(pending)).toBe("Processing transcript");
-    expect(audioStateLabel(attention)).toBe("Transcript processing needs attention");
+    expect(audioStateLabel(pending)).toBe("Processing transcript · Speaker analysis blocked by transcription");
+    expect(audioStateLabel(attention)).toBe("Transcript processing needs attention · Speaker analysis blocked by transcription");
     expect(audioStateLabel(chunk({ id: "gone", audio_playable: false, transcript: "Text is kept" }))).toBe("Audio no longer retained");
   });
 

@@ -547,3 +547,9 @@ live uploads. Existing legacy access and unrelated launch settings are preserved
 The reader release and subsequent cache-race repair are live in immutable source
 `5f61e21e0c94ba9c5ef86e31372ec3354253f9a8`. Cache maintenance preserves active
 decoder partials and current leases. The full backend suite passes 436 tests.
+
+Recovery completed: 415 of 415 preserved originals recovered, zero unresolved; all
+415 VAD jobs and speaker analyses finished. Final preservation, index, storage,
+authentication, playback and launch-setting checks passed. All 987 recordings were
+complete at readback, including 77 new arrivals; none needed attention or retry.
+Topic analysis still requires interactive Pi xAI sign-in.

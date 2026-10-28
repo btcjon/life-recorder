@@ -19,7 +19,7 @@ authentication, consent, existing transcripts and seven-day completion-based ret
 - [x] Pending/failed retained audio, scoped day counts, shared truthful health and storage bytes.
 - [x] Required tests; immutable release; ten-recording canary and new-arrival checks.
 - [x] Thirty-minute observation before expansion.
-- [ ] Reconcile every expanded-recovery manifest entry.
+- [x] Reconcile every expanded-recovery manifest entry: 415 recovered, zero unresolved.
 
 ## Release 2
 
@@ -72,3 +72,27 @@ active partials and serializes eviction with lease publication, reading current 
 The full 436-test backend suite and fresh production bundle passed before immutable
 patch `5f61e21e0c94ba9c5ef86e31372ec3354253f9a8` was deployed through the same launch job.
 No attempts were reset through SQL and no completed transcript was reprocessed.
+
+## Final recovery readback — October 28, 2026
+
+All 415 retained originals recovered through authenticated retry, with no unresolved
+manifest entries. VAD completed for all 415; speaker analysis returned 311 success,
+56 low-coverage and 48 no-speech results. All 366 nonempty recovered transcripts match
+their indexed bodies. At final readback all 987 recordings were complete, including
+77 new arrivals since the preservation baseline; pending, attention and retry counts
+were zero. The source and engine manifests verified, storage accounting was complete,
+and day/global counts, original-audio HEAD/range access, authentication denial,
+legacy access and unrelated launch settings passed live checks.
+
+The final preservation audit passed SQLite integrity, all 495 prior transcript bodies
+and completion times, all 415 live and preservation-copy source hashes, human labels,
+edits, voice samples, pins, cursor identity and existing index identities/bodies.
+Keyed and full-text indexes each contained 757 rows; search generation was 1717.
+No older database was restored and no completed transcript was reprocessed.
+
+Private backups and sanitized receipts are retained under
+`/Users/jonbennett/Library/Application Support/LifeRecorder-RecoverySafety-20261028T174500Z`:
+`recovery-manifest.json`, `final-readback.json`, `preservation-latest.json` and
+observation receipts accompany the consistent backup and preserved originals.
+Topic authentication remains the only external blocker: Pi requires interactive xAI
+sign-in before topic analysis can resume through its existing read-only receiver route.

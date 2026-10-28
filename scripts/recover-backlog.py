@@ -2,7 +2,7 @@
 
 The ledger is read-only. An uncertain POST is reconciled from the ledger before
 any further action; an attention row after an uncertain POST requires review.
-Run a ten-item canary first. Expansion requires an explicit --limit after gates.
+Run a ten-item canary first. Expansion requires --expand after safety gates.
 """
 import argparse
 import fcntl
@@ -51,6 +51,7 @@ def main():
     parser.add_argument('--manifest', type=Path, required=True)
     parser.add_argument('--apply', action='store_true')
     parser.add_argument('--limit', type=int, default=10)
+    parser.add_argument('--expand', action='store_true', help='Expand beyond the canary after the thirty-minute safety gate')
     args = parser.parse_args()
     os.umask(0o077)
     root = args.data_dir.resolve(strict=True)
@@ -88,6 +89,30 @@ def main():
                 chosen = [entries[round(i * (len(entries) - 1) / 9)] for i in range(10)]
                 manifest['entries'] = chosen + [e for e in entries if e not in chosen]
             save(manifest_path, manifest)
+        canary = manifest['entries'][:10]
+        canary_rows = [db.execute('SELECT * FROM chunks WHERE id=?', (entry['id'],)).fetchone() for entry in canary]
+        if 'canary_started_at' not in manifest:
+            completed = [row['completed_at'] for row in canary_rows if row and row['completed_at']]
+            if completed:
+                manifest['canary_started_at'] = min(completed)
+            elif args.apply:
+                manifest['canary_started_at'] = time.time()
+            save(manifest_path, manifest)
+        if args.apply and args.expand:
+            started = manifest.get('canary_started_at')
+            if not started or time.time() - started < 1800:
+                raise RuntimeError('thirty_minute_gate_not_passed')
+            for row in canary_rows:
+                if (not row or row['status'] != 'complete' or row['vad_status'] != 'complete'
+                        or row['diarization_status'] not in ('success', 'low_coverage', 'no_speech')):
+                    raise RuntimeError('canary_downstream_gate_not_passed')
+                if row['transcript']:
+                    indexed = db.execute('SELECT body FROM agent_transcripts WHERE chunk_id=?', (row['id'],)).fetchone()
+                    if not indexed or indexed[0] != row['transcript']:
+                        raise RuntimeError('canary_index_gate_not_passed')
+            if not db.execute("SELECT 1 FROM chunks WHERE received>? AND status='complete' LIMIT 1", (started,)).fetchone():
+                raise RuntimeError('new_arrival_gate_not_passed')
+        canary_ids = {entry['id'] for entry in canary}
         health = None
         submitted = 0
         for entry in manifest['entries']:
@@ -95,6 +120,8 @@ def main():
             state = reconcile(entry, row)
             save(manifest_path, manifest)
             if state != 'retained' or not args.apply or submitted >= args.limit:
+                continue
+            if not args.expand and entry['id'] not in canary_ids:
                 continue
             path = Path(row['path']).resolve()
             if not path.is_relative_to(root / 'audio') or not path.is_file() or digest(path) != entry['sha256']:

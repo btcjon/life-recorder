@@ -142,6 +142,32 @@ class RecoveryRuntimeTests(unittest.TestCase):
         self.inbox.accept(source, identifier, hashlib.sha256(b'new-original').hexdigest(), 'test', '2026-10-03T10:00:00Z', 60)
         self.assertEqual(self.inbox.receipt(identifier)['audio_bytes'], len(b'new-original'))
 
+    def test_recovery_rerun_cannot_expand_canary_without_explicit_gate(self):
+        for _ in range(12):
+            self.add_recording(time.time(), 'needs_attention')
+        spec = importlib.util.spec_from_file_location('recover_backlog', Path(__file__).resolve().parents[1] / 'scripts/recover-backlog.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        (self.inbox.root / 'viewer.token').write_text('private-test-token')
+        manifest = self.inbox.root / 'manifest.json'
+        arguments = ['recover-backlog', '--data-dir', str(self.inbox.root), '--manifest', str(manifest), '--apply', '--limit', '12']
+        submitted = []
+        def request(request, **kwargs):
+            if request.full_url.endswith('/v1/health'):
+                return io.BytesIO(b'{"processing":{"engine_ready":true}}')
+            identifier = request.full_url.split('/')[-2]
+            submitted.append(identifier)
+            self.inbox.retry_chunk(identifier)
+            return io.BytesIO(b'{}')
+        with patch.object(sys, 'argv', arguments), patch.object(module.urllib.request, 'urlopen', side_effect=request):
+            module.main()
+            module.main()
+        self.assertEqual(len(submitted), 10)
+        self.assertEqual(len(set(submitted)), 10)
+        with patch.object(sys, 'argv', arguments + ['--expand']):
+            with self.assertRaisesRegex(RuntimeError, 'thirty_minute_gate_not_passed'):
+                module.main()
+
 
 if __name__ == '__main__':
     unittest.main()

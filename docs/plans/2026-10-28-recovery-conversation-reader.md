@@ -96,3 +96,8 @@ Private backups and sanitized receipts are retained under
 observation receipts accompany the consistent backup and preserved originals.
 Topic authentication remains the only external blocker: Pi requires interactive xAI
 sign-in before topic analysis can resume through its existing read-only receiver route.
+
+The repaired cache passed a further 1,833-second observation with 58 healthy samples,
+zero engine-unready samples and zero stalled samples. The receipt is
+`cache-repair-observation.json` in the private safety directory. Final Pi readiness
+still reported `invalid_state`; no receiver credential writer was introduced.

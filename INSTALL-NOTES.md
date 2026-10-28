@@ -531,7 +531,8 @@ The existing model, Pi/Grok route, capture and consent boundaries remain selecte
 
 A private consistent backup and 415 hashed originals were preserved before changes.
 The ten-recording canary completed ASR, VAD and speaker analysis; new arrivals also
-complete. Broad recovery remains gated until the thirty-minute observation completes.
+complete. The thirty-minute observation passed with 50 healthy samples; all 405
+remaining originals were requeued through the authenticated recovery utility.
 Pi topic authentication reports `invalid_state` and requires interactive renewal.
 
 The conversation reader includes ordered verbatim source text, Sources disclosure,
@@ -543,3 +544,6 @@ verification are recorded in `docs/plans/2026-10-28-recovery-conversation-reader
 Rollback is code/configuration only. Never restore the preservation database over
 live uploads. Existing legacy access and unrelated launch settings are preserved.
 
+The reader release and subsequent cache-race repair are live in immutable source
+`5f61e21e0c94ba9c5ef86e31372ec3354253f9a8`. Cache maintenance preserves active
+decoder partials and current leases. The full backend suite passes 436 tests.

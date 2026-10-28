@@ -20,6 +20,8 @@ def operation(inbox, name):
     try:
         yield
     except Exception as error:
+        if name == 'engine_transcription' and isinstance(error, OSError):
+            name = 'engine_launch'
         code = getattr(error, 'returncode', None)
         logging.warning('processing operation=%s exception=%s errno=%s exit=%s signal=%s seconds=%.3f',
                         name, type(error).__name__, getattr(error, 'errno', None),

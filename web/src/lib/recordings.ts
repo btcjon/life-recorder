@@ -186,7 +186,7 @@ export function groupSourceLabel(block: DisplayBlock): string {
 
 export function groupSourceDetail(block: DisplayBlock): string {
   const kind = groupSourceKind(block);
-  if (kind === "topic") return "AI topic (inferred). Not a confirmed conversation.";
+  if (kind === "topic") return "AI topic (inferred)";
   if (kind === "time") return "Time group · no verified topic";
   return groupSourceLabel(block);
 }
@@ -263,7 +263,8 @@ export function buildRecordingList(payload: DayPayload | null, options: ListOpti
         rows.push({ type: "chunk", key: chunk.id, chunk });
         continue;
       }
-      const members = groupMembers(payload, block, options.showQuiet, showPending);
+      const members = groupMembers(payload, block, true, true);
+      if (members.every(chunk => isHiddenQuiet(chunk, options.showQuiet, showPending))) continue;
       if (!qualifiesAsGroup(block, members)) continue;
       const match = members.find((chunk) => chunkMatches(chunk, needle)) || null;
       const titleHit = !!needle && [block.title, block.preview].some((value) => (value || "").toLowerCase().includes(needle));
@@ -441,6 +442,7 @@ export function toPlayableChunk(chunk: Chunk) {
     id: chunk.id,
     kind: "chunk" as const,
     audioPlayable: !!chunk.audio_playable,
+    keepEligible: !chunk.status || chunk.status === 'complete',
     enhancedPlayable: false,
     label: chunk.started_local || chunk.started || "Recording",
     pinned: !!chunk.audio_pinned,

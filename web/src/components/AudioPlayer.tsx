@@ -9,6 +9,7 @@ import {
   type PlaybackResult,
   type PlayableItem,
 } from "../lib/playback";
+import type { ConversationQueue } from '../lib/conversation';
 
 export type AudioPlayerHandle = {
   playSpan: (span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean }) => void;
@@ -27,9 +28,11 @@ type AudioPlayerProps = {
   onKeep?: (id: string) => void | Promise<void>;
   playRequest?: PlayRequest | null;
   selection?: { key: string; label: string } | null;
+  queue?: ConversationQueue;
+  onQueueAdvance?: (skip?: boolean) => void;
 };
 
-export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({ item, client, onKeep, playRequest, selection }, ref) {
+export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(function AudioPlayer({ item, client, onKeep, playRequest, selection, queue, onQueueAdvance }, ref) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const stateRef = useRef(initialPlaybackState());
   const abortRef = useRef<AbortController | null>(null);
@@ -39,6 +42,9 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
   const [keepError, setKeepError] = useState("");
   const [view, setView] = useState(initialPlaybackState());
   const [clock, setClock] = useState(0);
+  const [resumeNeeded, setResumeNeeded] = useState(false);
+  const [mediaError, setMediaError] = useState(false);
+  const playingRef = useRef(false);
   const clientRef = useRef(client);
   clientRef.current = client;
 
@@ -49,6 +55,10 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
     if (fullIntent.current && fullIntent.current.generation !== result.state.generation) fullIntent.current = null;
     const audio = audioRef.current;
     if (result.fetch) {
+      playingRef.current = false;
+      setClock(0);
+      setMediaError(false);
+      setResumeNeeded(false);
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -134,7 +144,17 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
     if (!intent || !audio || intent.id !== stateRef.current.loadedId || intent.generation !== stateRef.current.generation) return;
     fullIntent.current = null;
     audio.currentTime = 0;
-    audio.play().catch(() => undefined);
+    attemptPlay(audio);
+  }
+
+  function attemptPlay(audio: HTMLAudioElement) {
+    const generation = stateRef.current.generation;
+    setResumeNeeded(false);
+    audio.play().catch((error: unknown) => {
+      if (generation !== stateRef.current.generation || isAbortError(error)) return;
+      if (error instanceof DOMException && error.name === 'NotAllowedError') setResumeNeeded(true);
+      else { audio.pause(); playingRef.current = false; setMediaError(true); }
+    });
   }
 
   function playQueued(expectedId: string, key: string) {
@@ -143,7 +163,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
     if (!pending || !audio || pending.expectedId !== expectedId || pending.key !== key) return;
     if (stateRef.current.loadedId !== expectedId) return;
     if (pending.fromStart || audio.currentTime < pending.start || audio.currentTime >= pending.end) audio.currentTime = pending.start;
-    audio.play().catch(() => undefined);
+    attemptPlay(audio);
   }
 
   function queueSpan(span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean }) {
@@ -192,8 +212,20 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
   const captionItem = view.item?.kind === "event" ? { ...view.item, label: (view.source === "enhanced" ? "Enhanced · " : "Speech-only · ") + view.item.label } : view.item;
   const caption = playbackCaption(captionItem, view.error, selection ?? null);
 
+  function retryAudio() {
+    const selected = stateRef.current.item;
+    if (!selected) return;
+    audioRef.current?.pause();
+    abortRef.current?.abort();
+    commit(reducePlayback(stateRef.current, { type: 'release' }));
+    commit(reducePlayback(stateRef.current, { type: 'select', item: selected }));
+    const id = audioIdentity(selected, stateRef.current.source);
+    if (id) fullIntent.current = { id, generation: stateRef.current.generation };
+  }
+
   return (
-    <footer className="min-w-0 overflow-x-hidden border-t bg-background px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" aria-label="Playback">
+    <footer hidden={!view.item} className="min-w-0 overflow-x-hidden border-t bg-background px-3 py-2 pb-[max(0.5rem,env(safe-area-inset-bottom))]" aria-label="Playback">
+      {queue && <div className="mb-1 text-xs text-muted-foreground" aria-live="polite"><p className="truncate" title={queue.label}>{queue.label} · {queue.finished ? 'Conversation complete · ' : ''}Source {queue.sources[queue.index]?.position} of {queue.total}</p><p>{Math.floor(clock / 60)}:{String(Math.floor(clock % 60)).padStart(2, '0')} in this source · Gaps are not recorded audio.</p></div>}
       <div className="flex min-w-0 flex-col gap-2 md:grid md:grid-cols-[minmax(0,0.8fr)_minmax(0,1.4fr)_auto_auto] md:items-center">
         <div className="min-w-0">
           <p className="truncate text-sm font-medium" aria-live="polite">{caption.primary}</p>
@@ -204,6 +236,18 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
           controls
           className="w-full max-w-full"
           preload="none"
+          onEnded={() => {
+            if (queue && !queue.finished && playingRef.current && !stateRef.current.pendingSpan && stateRef.current.clipStop == null && !mediaError && !view.error) {
+              playingRef.current = false;
+              onQueueAdvance?.();
+            }
+          }}
+          onError={() => {
+            if (!stateRef.current.objectUrl) return;
+            audioRef.current?.pause();
+            playingRef.current = false;
+            setMediaError(true);
+          }}
           onTimeUpdate={() => {
             const audio = audioRef.current;
             const clipStart = stateRef.current.clipStart;
@@ -225,6 +269,8 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
             }));
           }}
           onPlay={() => {
+            playingRef.current = true;
+            setResumeNeeded(false);
             const audio = audioRef.current;
             if (!audio) return;
             if (stateRef.current.clipStop != null && audio.currentTime >= stateRef.current.clipStop && stateRef.current.clipStart != null) {
@@ -242,7 +288,7 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
             </Button>
           </div>
         ) : <span className="sr-only">Original audio</span>}
-        {view.item?.kind === "chunk" && view.item.audioPlayable ? (
+        {view.item?.kind === "chunk" && view.item.audioPlayable && view.item.keepEligible !== false ? (
           <Button type="button" size="sm" variant="outline" disabled={!!item?.pinned || !onKeep || keeping} onClick={async () => {
             if (!item || !onKeep || keepBusy.current) return;
             const id = item.id;
@@ -255,6 +301,12 @@ export const AudioPlayer = forwardRef<AudioPlayerHandle, AudioPlayerProps>(funct
           </Button>
         ) : null}
       </div>
+      {(view.error || mediaError) && <div role="alert" className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+        <p>Playback paused because this source could not be played.</p>
+        <Button type="button" size="sm" variant="outline" onClick={retryAudio}>Retry</Button>
+        {queue && <Button type="button" size="sm" variant="outline" onClick={() => onQueueAdvance?.(true)}>Skip source</Button>}
+      </div>}
+      {resumeNeeded && <Button type="button" size="sm" className="mt-2" onClick={() => { if (audioRef.current) attemptPlay(audioRef.current); }}>Resume playback</Button>}
       {keepError && <p role="alert" className="mt-2 text-sm text-destructive">{keepError}</p>}
       <span className="sr-only">{clock.toFixed(1)}</span>
     </footer>

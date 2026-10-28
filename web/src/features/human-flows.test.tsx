@@ -298,11 +298,13 @@ describe("playback across views", () => {
     });
     const user = userEvent.setup();
     render(<App client={client} />);
-    expect(await screen.findByRole("contentinfo", { name: "Playback" })).toBeTruthy();
+    expect(document.querySelector('footer[aria-label="Playback"]')).toHaveProperty('hidden', true);
+    const mountedAudio = document.querySelector('audio');
     await user.click(screen.getByRole("button", { name: "More" }));
     await user.click(screen.getByRole("menuitem", { name: "Review" }));
     await user.click(screen.getByRole("button", { name: "People" }));
-    expect(screen.getAllByRole("contentinfo", { name: "Playback" })).toHaveLength(1);
+    expect(document.querySelectorAll('footer[aria-label="Playback"]')).toHaveLength(1);
+    expect(document.querySelector('audio')).toBe(mountedAudio);
     await user.click(screen.getByRole("button", { name: "More" }));
     expect(screen.getByRole("menuitem", { name: "Context" }).textContent).not.toContain("Later");
     expect(screen.getByRole("menuitem", { name: "Review" }).textContent || "").not.toContain("Later");

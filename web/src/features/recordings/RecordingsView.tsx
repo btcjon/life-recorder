@@ -30,6 +30,7 @@ export function RecordingsView({
   playerRef,
   onRoute,
   onPlayItem,
+  onPlayConversation,
   onReload,
   onRefresh,
   onIdentityChange,
@@ -44,6 +45,7 @@ export function RecordingsView({
   playerRef: RefObject<AudioPlayerHandle | null>;
   onRoute: (patch: Partial<RouteState>, historyMode?: "push" | "replace") => void;
   onPlayItem?: (item: PlayableItem, span?: SpanRequest | null) => void;
+  onPlayConversation?: (items: PlayableItem[], label: string) => void;
   onReload: () => Promise<boolean> | boolean | void;
   onRefresh: () => void;
   onIdentityChange?: (changeId: string | null) => void;
@@ -268,6 +270,7 @@ export function RecordingsView({
       onPlaySpan={() => undefined}
       onPlayFull={() => playerRef.current?.playFull()}
       onPlayItem={onPlayItem}
+      onPlayConversation={onPlayConversation}
       onOpenSource={openSource}
       reviewNotice={reviewNotice}
       onIdentityChange={onIdentityChange}
@@ -293,7 +296,7 @@ export function RecordingsView({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col overflow-x-hidden">
-      <div className="flex min-w-0 flex-wrap items-center gap-2 border-b px-3 py-2">
+      <div className={mobile && route.pane === 'detail' && route.selectedId ? 'hidden' : 'flex min-w-0 flex-wrap items-center gap-2 border-b px-3 py-2'}>
         <div role="group" aria-label="Library view" className="flex gap-1">
           <Button type="button" size="sm" variant={route.groups ? "secondary" : "outline"} className="touch-target" aria-pressed={route.groups} onClick={() => onRoute({ groups: true, flat: false, selectedId: null, selectedKind: "group", pane: "list" }, "replace")}>Groups</Button>
           <Button type="button" size="sm" variant={route.groups ? "outline" : "secondary"} className="touch-target" aria-pressed={!route.groups} onClick={() => onRoute({ groups: false, flat: true, selectedId: null, selectedKind: "chunk", pane: "list" }, "replace")}>Individual recordings</Button>

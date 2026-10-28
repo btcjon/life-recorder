@@ -48,7 +48,7 @@ export function RecordingList({
                 <Button id={"recording-" + row.key} type="button" variant={active ? "secondary" : "ghost"} className="recording-row touch-target h-auto w-full justify-start whitespace-normal text-left" aria-current={active ? "true" : undefined} onClick={() => onSelectGroup(row.key)}>
                   <span className="min-w-0">
                     <span className="block font-medium">{eventTitle(row.block)}</span>
-                    <span className="block text-xs text-muted-foreground">{label} · {eventRange(row.block)} · {row.members.length} recordings · {recordedLength(seconds)}</span>
+                    <span className="block text-xs text-muted-foreground">{eventRange(row.block)} · {row.members.length} recordings · {recordedLength(seconds)}</span>
                     <span className="block truncate text-xs text-muted-foreground">{preview(matched?.transcript || row.block.preview || row.members.find((chunk) => chunk.transcript)?.transcript)}</span>
                   </span>
                 </Button>
@@ -66,7 +66,6 @@ export function RecordingList({
                   </ul>
                 </details>
                 <Badge variant={groupSourceKind(row.block) === "manual" ? "secondary" : "outline"}>{label}</Badge>
-                {groupSourceKind(row.block) === "time" ? <Badge variant="outline">No verified topic</Badge> : null}
               </div>
             );
           }

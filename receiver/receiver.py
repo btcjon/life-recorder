@@ -1406,6 +1406,14 @@ def worker(inbox: Inbox, stop: threading.Event, model: Path, whisper: str, ffmpe
                 inbox.complete(row["id"], text, provenance)
         except Exception as error:
             # Keep the audio. Store a safe code, never tool output or a transcript.
+            if isinstance(error, asr_mod.ProcessingFailure) and error.stage in ('engine_launch', 'engine_transcription', 'decode'):
+                try:
+                    with processing_runtime.operation(inbox, 'engine_preflight'):
+                        processing_runtime.preflight(config)
+                except Exception:
+                    inbox.processing_runtime.update(engine_ready=False, engine_error='engine_unavailable', engine_checked_at=time.time())
+                    next_preflight = time.monotonic() + 60
+                    continue
             record_processing_failure(inbox, row, error)
 
 

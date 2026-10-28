@@ -51,6 +51,7 @@ type DetailProps = {
   onPlaySpan: (span: SpanRequest) => void;
   onPlayFull: () => void;
   onPlayItem?: (item: PlayableItem, span?: SpanRequest | null) => void;
+  onPlayConversation?: (items: PlayableItem[], label: string) => void;
   onOpenSource?: (id: string, started?: string) => void;
   reviewNotice?: string;
   onReload: () => Promise<boolean> | boolean | void;
@@ -84,7 +85,7 @@ function HighlightedTranscript({ text, query, label }: { text: string; query: st
     ref.current?.querySelector("mark")?.scrollIntoView({ block: "nearest" });
   }, [hasMatch, text, query]);
   return (
-    <p ref={ref} className="transcript max-w-3xl leading-relaxed" aria-label={label}>
+    <p ref={ref} className="transcript max-w-3xl whitespace-pre-wrap leading-relaxed" aria-label={label}>
       {segments.length ? segments.map((part, index) => part.match
         ? <mark key={index} className="rounded-sm bg-primary/20 text-inherit">{part.text}</mark>
         : <span key={index}>{part.text}</span>) : "No transcript text."}
@@ -188,8 +189,10 @@ function EventContext({ event, payload, query = "", onPlayItem, onOpenSource }: 
   );
 }
 
-function GroupDetail({ group, payload, query = "", client, onPlayItem, onOpenSource, onReload, readOnly }: DetailProps & { group: { block: DisplayBlock; members: Chunk[] } }) {
-  const sources = group.members.length;
+function GroupDetail({ group, payload, query = "", client, onPlayItem, onPlayConversation, onOpenSource, onReload, readOnly }: DetailProps & { group: { block: DisplayBlock; members: Chunk[] } }) {
+  const members = [...group.members].sort((a, b) => (a.started || '').localeCompare(b.started || '') || a.id.localeCompare(b.id));
+  const sources = members.length;
+  const unavailable = members.filter(source => !source.audio_playable);
   return (
     <article id="recording-detail" className="h-full min-w-0 overflow-y-auto p-4 pb-8 [overflow-wrap:anywhere] md:p-8" tabIndex={-1}>
       <div className="grid min-w-0 max-w-3xl gap-4">
@@ -199,8 +202,27 @@ function GroupDetail({ group, payload, query = "", client, onPlayItem, onOpenSou
           {group.block.day_portion ? <p className="text-xs text-muted-foreground">This day shows part of the saved boundaries.</p> : null}
         </header>
         {group.block.summary_state === "ready" && group.block.summary ? <p className="text-sm">{group.block.summary}</p> : null}
-        <SourceTranscripts members={group.members} query={query} onPlayItem={onPlayItem} onOpenSource={onOpenSource} />
-        <BoundaryEditor block={group.block} payload={payload} client={client} onReload={onReload} readOnly={readOnly} />
+        {unavailable.length > 0 && <p role="status" className="text-sm">{unavailable.length} of {sources} sources have no retained audio: {unavailable.map(source => source.started_local || source.started || source.id).join(', ')}. Play conversation plays the available sources in order.</p>}
+        <Button type="button" className="touch-target w-fit" disabled={!onPlayConversation || unavailable.length === sources} onClick={() => onPlayConversation?.(members.map(toPlayableChunk), eventTitle(group.block))}>Play conversation</Button>
+        <div className="grid gap-5" aria-label="Conversation transcript">
+          {members.map(chunk => <section key={chunk.id} id={'source-' + chunk.id} className="min-w-0">
+            <button type="button" className="touch-target mb-1 text-left text-xs text-muted-foreground underline" onClick={() => onOpenSource?.(chunk.id)}>{chunk.started_local || chunk.started} · source boundary</button>
+            {chunk.transcript ? <HighlightedTranscript text={chunk.transcript} query={query} /> : <p className="text-sm text-muted-foreground">{transcriptState(chunk)}</p>}
+          </section>)}
+        </div>
+        <details className="max-w-3xl rounded-xl border p-3">
+          <summary className="touch-target cursor-pointer text-sm font-medium">Sources · {sources} {sources === 1 ? 'recording' : 'recordings'}</summary>
+          <div className="grid gap-3 pt-3">{members.map(chunk => <section key={chunk.id} className="grid gap-2 border-t pt-3">
+            <p className="text-sm">{chunk.started_local || chunk.started} · {Number(chunk.duration || 0).toFixed(0)} seconds</p>
+            <p className="text-xs text-muted-foreground">{processingBits(chunk)} · {speakerPendingLabel(chunk)}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" size="sm" variant="outline" className="touch-target" disabled={!chunk.audio_playable} onClick={() => onPlayItem?.(toPlayableChunk(chunk), null)}>Play recording</Button>
+              <Button type="button" size="sm" variant="outline" className="touch-target" onClick={() => onOpenSource?.(chunk.id)}>Open source · speakers and processing</Button>
+            </div>
+          </section>)}
+          <BoundaryEditor block={group.block} payload={payload} client={client} onReload={onReload} readOnly={readOnly} />
+          </div>
+        </details>
       </div>
     </article>
   );

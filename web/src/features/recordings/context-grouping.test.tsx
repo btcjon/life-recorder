@@ -59,6 +59,30 @@ beforeEach(() => {
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 describe("context-first sidebar", () => {
+  it('keeps a frozen conversation queue across search, refresh and navigation, and replaces it on explicit source playback', async () => {
+    let current = payload;
+    const paths = setupPayload(() => current);
+    fireEvent.click(await screen.findByRole('button', {name: /Project launch planning/}));
+    fireEvent.click(screen.getByRole('button', {name: 'Play conversation'}));
+    const audio = document.querySelector('audio')!;
+    await waitFor(() => expect(paths.filter(path => path.includes('/audio/'))).toEqual(['/v1/audio/a']));
+    fireEvent.loadedMetadata(audio);
+    fireEvent.play(audio);
+    current = {...payload, display_blocks: [{...blocks[0], id: 'regrouped', chunk_ids: ['b', 'a']}, ...blocks.slice(1)]};
+    fireEvent.change(screen.getByRole('searchbox'), {target: {value: 'orchard'}});
+    fireEvent.click(screen.getByRole('button', {name: 'Refresh'}));
+    await screen.findByRole('heading', {name: 'Orchard irrigation'});
+    fireEvent.ended(audio);
+    await waitFor(() => expect(paths.filter(path => path.includes('/audio/'))).toEqual(['/v1/audio/a', '/v1/audio/b']));
+    expect(screen.getByText(/Source 2 of 2/)).toBeTruthy();
+    expect(document.querySelector('audio')).toBe(audio);
+    fireEvent.click(screen.getByRole('button', {name: 'Play conversation'}));
+    await waitFor(() => expect(paths.filter(path => path.includes('/audio/'))).toEqual(['/v1/audio/a', '/v1/audio/b', '/v1/audio/c']));
+    fireEvent.click(screen.getByText('Sources · 1 recording'));
+    fireEvent.click(screen.getByRole('button', {name: 'Play recording'}));
+    expect(screen.queryByText(/Source 1 of 1/)).toBeNull();
+  });
+
   it("defaults to meaningful inferred titles with one-click ordered full text", async () => {
     const paths = setupPayload();
     const row = await screen.findByRole("button", { name: /Project launch planning/ });
@@ -70,7 +94,7 @@ describe("context-first sidebar", () => {
     expect([...document.querySelectorAll(".transcript")].map(node => node.textContent)).toEqual([chunks[0].transcript, chunks[1].transcript]);
     expect(paths.some(path => path.includes("/audio/"))).toBe(false);
     expect(HTMLMediaElement.prototype.play).not.toHaveBeenCalled();
-    expect(screen.getByText(/Not a confirmed conversation/)).toBeTruthy();
+    expect(within(document.querySelector('article')!).getByText(/AI topic \(inferred\)/)).toBeTruthy();
   });
 
   it("expands actual sources and opens source text without playback", async () => {

@@ -7,6 +7,7 @@ export type PlayableItem = {
   enhancedPlayable: boolean;
   label: string;
   pinned: boolean;
+  keepEligible?: boolean;
   preferredSource?: AudioSource;
 };
 

@@ -1,8 +1,9 @@
 import { StrictMode, createRef } from "react";
-import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AudioPlayer, type AudioPlayerHandle } from "./AudioPlayer";
 import { createClient } from "../api/client";
+import { freezeConversation } from '../lib/conversation';
 
 beforeEach(() => {
   HTMLMediaElement.prototype.play = vi.fn(() => Promise.resolve());
@@ -56,4 +57,40 @@ it("loads correctly after StrictMode cleanup and releases its blob on unmount", 
   expect(ref.current?.loadedAudioId()).toBe("chunk:a:original");
   view.unmount();
   expect(URL.revokeObjectURL).toHaveBeenCalled();
+});
+
+it('advances a conversation only on ended and pauses unexpected failure for Retry or Skip', async () => {
+  const next = vi.fn();
+  const fetch = vi.fn(async () => new Response(new Blob(['audio'])));
+  const client = createClient({ getToken: () => '', isRemote: () => true, fetchImpl: fetch });
+  const queue = freezeConversation([a, { ...a, id: 'b' }], 'Conversation')!;
+  const view = render(<AudioPlayer item={a} client={client} queue={queue} onQueueAdvance={next} playRequest={{nonce: 1}} />);
+  const audio = view.container.querySelector('audio')!;
+  await waitFor(() => expect(audio.src).toContain('blob:'));
+  expect(fetch).toHaveBeenCalledTimes(1);
+  fireEvent.play(audio);
+  fireEvent.error(audio);
+  fireEvent.ended(audio);
+  expect(next).not.toHaveBeenCalled();
+  expect(screen.getByRole('button', {name: 'Retry'})).toBeTruthy();
+  fireEvent.click(screen.getByRole('button', {name: 'Retry'}));
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  fireEvent.play(audio);
+  fireEvent.ended(audio);
+  expect(next).toHaveBeenCalledTimes(1);
+  fireEvent.error(audio);
+  fireEvent.click(screen.getByRole('button', {name: 'Skip source'}));
+  expect(next).toHaveBeenCalledTimes(2);
+});
+
+it('offers explicit Resume when the browser rejects automatic playback', async () => {
+  HTMLMediaElement.prototype.play = vi.fn().mockRejectedValueOnce(new DOMException('blocked', 'NotAllowedError')).mockResolvedValue(undefined);
+  const client = createClient({ getToken: () => '', isRemote: () => true, fetchImpl: async () => new Response(new Blob(['audio'])) });
+  const view = render(<AudioPlayer item={a} client={client} playRequest={{nonce: 1}} />);
+  const audio = view.container.querySelector('audio')!;
+  await waitFor(() => expect(audio.src).toContain('blob:'));
+  fireEvent.loadedMetadata(audio);
+  const resume = await screen.findByRole('button', {name: 'Resume playback'});
+  fireEvent.click(resume);
+  await waitFor(() => expect(screen.queryByRole('button', {name: 'Resume playback'})).toBeNull());
 });

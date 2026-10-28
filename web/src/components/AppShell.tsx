@@ -105,7 +105,7 @@ export function AppShell({
             ) : null}
           </div>
         </nav>
-        <p className="ml-auto hidden max-w-full truncate text-xs text-muted-foreground md:block">{health}</p>
+        <p className="order-last basis-full break-words text-xs text-muted-foreground md:order-none md:ml-auto md:basis-auto">{health}</p>
         <a href="/legacy/" className="touch-target hidden items-center px-1 text-xs text-muted-foreground underline md:inline-flex">Legacy viewer</a>
         <Button type="button" variant="outline" size="sm" className="touch-target ml-auto md:ml-0" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-pressed={theme === "dark"} aria-label={theme === "dark" ? "Light theme" : "Dark theme"}>
           {theme === "dark" ? <Sun /> : <Moon />}

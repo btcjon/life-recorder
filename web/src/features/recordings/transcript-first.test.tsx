@@ -81,7 +81,8 @@ describe("transcript-first workflow", () => {
     expect(screen.getByRole("heading", { name: "Saved title" })).toBeTruthy();
     const texts = [...document.querySelectorAll(".transcript")].map(node => node.textContent);
     expect(texts).toEqual([first.transcript, second.transcript]);
-    fireEvent.click(screen.getAllByRole("button", { name: "Speaker naming" })[1]);
+    fireEvent.click(screen.getByText('Sources · 2 recordings'));
+    fireEvent.click(screen.getAllByRole("button", { name: "Open source · speakers and processing" })[1]);
     expect(source).toHaveBeenCalledExactlyOnceWith("b"); expect(play).not.toHaveBeenCalled();
   });
 

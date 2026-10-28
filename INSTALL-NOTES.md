@@ -520,3 +520,26 @@ Candidate change in repo, not deployed at that point: an exact-host `NSException
 - Rollback: the pre-deployment database backup and prior immutable release are retained in the private runtime safety folder. Restore the previous launch-agent source path and manifest pin to roll back executable code; do not overwrite the live database with a stale backup. Context migration adds its own table without rewriting the recording/identity tables.
 
 See `docs/context-awareness.md` for the evidence contract and supported boundaries.
+# October 28, 2026 — processing recovery and conversation reader
+
+Release 1 source `9e3507ccd7fab2d37c7ba260b4b25a9ad8da1715` is installed in the
+existing `com.browseruse.life-recorder.receiver` launch job. Required FluidAudio
+code/resources now run from an owner-private, versioned, hash-pinned artifact
+outside Dropbox. The original Dropbox executable was online-only; the private copy
+passes architecture, signature, launch and old/recent recording transcription checks.
+The existing model, Pi/Grok route, capture and consent boundaries remain selected.
+
+A private consistent backup and 415 hashed originals were preserved before changes.
+The ten-recording canary completed ASR, VAD and speaker analysis; new arrivals also
+complete. Broad recovery remains gated until the thirty-minute observation completes.
+Pi topic authentication reports `invalid_state` and requires interactive renewal.
+
+The conversation reader includes ordered verbatim source text, Sources disclosure,
+frozen sequential original playback, explicit Retry/Skip/Resume, per-source clocks,
+and an idle hidden player whose controller stays mounted. Library controls collapse
+in the mobile reader. Backend and frontend checks plus rendered desktop/320/390
+verification are recorded in `docs/plans/2026-10-28-recovery-conversation-reader.md`.
+
+Rollback is code/configuration only. Never restore the preservation database over
+live uploads. Existing legacy access and unrelated launch settings are preserved.
+

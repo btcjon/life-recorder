@@ -11,6 +11,7 @@ import { HealthView, type HealthSnapshot } from "./features/health/HealthView";
 import { easternDay } from "./lib/identity";
 import { audioIdentity, type PlayableItem } from "./lib/playback";
 import { dayStatus } from "./lib/recordings";
+import { freezeConversation, type ConversationQueue } from './lib/conversation';
 import { readRoute, routeUrl, type RouteState } from "./lib/route";
 
 export function App({ client }: { client: ApiClient }) {
@@ -22,6 +23,7 @@ export function App({ client }: { client: ApiClient }) {
   const [playback, setPlayback] = useState<{
     item: PlayableItem;
     nonce: number;
+    queue?: ConversationQueue;
     span: { key: string; start: number; end: number; expectedAudioId: string; fromStart: boolean } | null;
   } | null>(null);
   const [route, setRoute] = useState<RouteState>(() => readRoute(new URLSearchParams(window.location.search), window.location.pathname));
@@ -137,6 +139,22 @@ export function App({ client }: { client: ApiClient }) {
     setPlayback({ item, nonce: playNonce.current, span: span ?? null });
   }, []);
 
+  const requestConversation = useCallback((items: PlayableItem[], label: string) => {
+    const queue = freezeConversation(items, label);
+    if (!queue) return;
+    setPlayback({ item: queue.sources[0]!.item, nonce: ++playNonce.current, span: null, queue });
+  }, []);
+
+  const advanceConversation = useCallback((skip = false) => {
+    setPlayback(current => {
+      if (!current?.queue) return current;
+      const queue = { ...current.queue, index: current.queue.index + 1 };
+      const source = queue.sources[queue.index];
+      return source ? { item: source.item, nonce: ++playNonce.current, span: null, queue }
+        : skip ? null : { ...current, queue: { ...current.queue, finished: true } };
+    });
+  }, []);
+
   const selectedChunk = route.selectedKind === "chunk" ? (payload?.chunks || []).find((item) => item.id === route.selectedId) : undefined;
   const selectedEvent = route.selectedKind === "event" ? (payload?.events || []).find((item) => item.id === route.selectedId) : undefined;
   const selectedGroup = route.selectedKind === "group"
@@ -157,6 +175,8 @@ export function App({ client }: { client: ApiClient }) {
         selection={selection}
         client={client}
         playRequest={playback ? { nonce: playback.nonce, span: playback.span } : null}
+        queue={playback?.queue}
+        onQueueAdvance={advanceConversation}
         onKeep={async (id) => {
           await client.keepAudio(id);
           setPayload((current) => current ? { ...current, chunks: (current.chunks || []).map((chunk) => chunk.id === id ? { ...chunk, audio_pinned: true } : chunk) } : current);
@@ -178,6 +198,7 @@ export function App({ client }: { client: ApiClient }) {
           onIdentityChange={setLastChangeId}
           onRoute={updateRoute}
           onPlayItem={requestPlay}
+          onPlayConversation={requestConversation}
           onReload={() => route.day ? loadDay(route.day) : false}
           onRefresh={() => { void loadHealth(); if (route.day) void loadDay(route.day); }}
         />

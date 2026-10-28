@@ -1,4 +1,7 @@
 import importlib.util
+import hashlib
+import io
+import json
 from pathlib import Path
 import subprocess
 import sys
@@ -27,7 +30,7 @@ class RecoveryRuntimeTests(unittest.TestCase):
         path.write_bytes(b'original')
         with self.inbox.connect() as db:
             db.execute('INSERT INTO chunks(id,sha256,device,started,duration,path,received,status) VALUES(?,?,?,?,?,?,?,?)',
-                       (identifier, 'a' * 64, 'test', '2026-10-01T10:00:00Z', 60, str(path), received, status))
+                       (identifier, hashlib.sha256(b'original').hexdigest(), 'test', '2026-10-01T10:00:00Z', 60, str(path), received, status))
         return identifier
 
     def test_unavailable_engine_never_consumes_recording_attempt(self):
@@ -54,6 +57,21 @@ class RecoveryRuntimeTests(unittest.TestCase):
                 selected.append(row['id'])
                 db.execute("UPDATE chunks SET status='complete' WHERE id=?", (row['id'],))
         self.assertEqual(selected, recent[:3] + [old] + recent[3:])
+
+    def test_engine_disappearing_after_preflight_preserves_attempt_budget(self):
+        identifier = self.add_recording(time.time())
+        stop = threading.Event()
+        calls = 0
+        def preflight(config):
+            nonlocal calls
+            calls += 1
+            if calls > 1:
+                stop.set()
+                raise OSError(5, 'unavailable')
+        with patch('processing_runtime.preflight', side_effect=preflight), patch('receiver.transcribe', side_effect=asr.ProcessingFailure('engine_launch', 'engine_launch_failed', 'transient')):
+            receiver.worker(self.inbox, stop, Path('model'), 'whisper', 'ffmpeg')
+        self.assertEqual(self.inbox.receipt(identifier)['attempts'], 0)
+        self.assertFalse(self.inbox.processing_runtime['engine_ready'])
 
     def test_cache_oserror_has_cache_attribution_without_private_text(self):
         with self.assertLogs(level='WARNING') as logs:
@@ -82,6 +100,47 @@ class RecoveryRuntimeTests(unittest.TestCase):
         self.assertEqual(module.reconcile(entry, {'status': 'complete'}), 'recovered')
         entry['state'] = 'uncertain'
         self.assertEqual(module.reconcile(entry, {'status': 'pending'}), 'queued')
+
+    def test_recovery_resumes_after_uncertain_post_without_replaying_or_touching_complete(self):
+        identifier = self.add_recording(time.time(), 'needs_attention')
+        completed = self.add_recording(time.time(), 'complete')
+        spec = importlib.util.spec_from_file_location('recover_backlog', Path(__file__).resolve().parents[1] / 'scripts/recover-backlog.py')
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        (self.inbox.root / 'viewer.token').write_text('private-test-token')
+        manifest = self.inbox.root / 'manifest.json'
+        arguments = ['recover-backlog', '--data-dir', str(self.inbox.root), '--manifest', str(manifest), '--apply']
+        calls = []
+        def request(request, **kwargs):
+            calls.append(request.full_url)
+            if request.full_url.endswith('/v1/health'):
+                return io.BytesIO(b'{"processing":{"engine_ready":true}}')
+            self.inbox.retry_chunk(identifier)
+            raise TimeoutError('response lost after acceptance')
+        with patch.object(sys, 'argv', arguments), patch.object(module.urllib.request, 'urlopen', side_effect=request):
+            with self.assertRaisesRegex(RuntimeError, 'retry_outcome_requires_reconciliation'):
+                module.main()
+            module.main()
+        data = json.loads(manifest.read_text())
+        self.assertEqual([entry['id'] for entry in data['entries']], [identifier])
+        self.assertEqual(data['entries'][0]['state'], 'queued')
+        self.assertEqual(sum(url.endswith('/retry') for url in calls), 1)
+        self.assertEqual(self.inbox.receipt(completed)['status'], 'complete')
+
+    def test_day_counts_are_scoped_and_original_bytes_are_available_at_receipt(self):
+        self.add_recording(time.time())
+        other = self.add_recording(time.time(), 'needs_attention')
+        with self.inbox.connect() as db:
+            db.execute("UPDATE chunks SET started='2026-10-02T10:00:00Z' WHERE id=?", (other,))
+        report = self.inbox.viewer_day('2026-10-01')
+        self.assertEqual(report['day_processing']['pending'], 1)
+        self.assertEqual(report['day_processing']['needs_attention'], 0)
+        self.assertEqual(report['global_processing']['needs_attention'], 1)
+        source = self.inbox.root / 'upload'
+        source.write_bytes(b'new-original')
+        identifier = str(uuid.uuid4())
+        self.inbox.accept(source, identifier, hashlib.sha256(b'new-original').hexdigest(), 'test', '2026-10-03T10:00:00Z', 60)
+        self.assertEqual(self.inbox.receipt(identifier)['audio_bytes'], len(b'new-original'))
 
 
 if __name__ == '__main__':

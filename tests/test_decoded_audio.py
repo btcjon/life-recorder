@@ -16,6 +16,23 @@ from receiver import Inbox
 
 
 class SharedDecodeTests(unittest.TestCase):
+    def test_maintenance_preserves_inflight_decode_and_live_lease(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            work = Path(scratch)
+            source = work / 'clip.m4a'
+            source.write_bytes(b'audio')
+            cache = decoded_audio.DecodeCache(work)
+            def decode(argv, **kwargs):
+                partial = Path(argv[-1])
+                partial.write_bytes(b'RIFF')
+                cache.sync_pins([])
+                self.assertTrue(partial.is_file())
+            lease = cache.acquire('ffmpeg', source, 'clip', run=decode)
+            cache.sync_pins([])
+            self.assertEqual(lease.path.read_bytes(), b'RIFF')
+            lease.release()
+            self.assertFalse(lease.path.exists())
+
     def test_zero_byte_cache_is_rebuilt_and_empty_output_is_not_cached(self):
         with tempfile.TemporaryDirectory() as scratch:
             work = Path(scratch)

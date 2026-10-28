@@ -120,11 +120,19 @@ class DecodeCache:
                 wanted[self.key_for(chunk_id, source)] = source
         with self._guard:
             self._pins = {key: 1 for key in wanted}
-            leased = dict(self._leases)
         for path in self.root.glob("*.wav"):
+            # A decoder owns its temporary file until atomic publication.
+            # Only startup's abandoned-file sweep may remove partials.
+            if path.name.endswith('.partial.wav'):
+                continue
             key = path.name[:-4]
-            if key not in wanted and leased.get(key, 0) <= 0:
-                path.unlink(missing_ok=True)
+            # Serialize eviction with publication and lease registration, then
+            # read current ownership rather than an earlier lease snapshot.
+            with self._lock(key):
+                with self._guard:
+                    retained = self._pins.get(key, 0) > 0 or self._leases.get(key, 0) > 0
+                if not retained:
+                    path.unlink(missing_ok=True)
 
     def sweep_abandoned(self) -> None:
         for path in self.work.glob("*-diar.wav"):

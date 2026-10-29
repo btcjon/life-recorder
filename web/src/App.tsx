@@ -50,18 +50,32 @@ export function App({ client }: { client: ApiClient }) {
 
   const loadHealth = useCallback(async () => {
     const ticket = gate.start("health");
+    const controller = new AbortController();
+    const cancel = () => controller.abort();
+    ticket.signal.addEventListener('abort', cancel, { once: true });
+    let timedOut = false;
+    let deadline: number | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      deadline = window.setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+        reject(new Error('Processing status request timed out'));
+      }, 10000);
+    });
     setHealthLoading(true);
     try {
-      const report = await client.health(ticket.signal);
+      const report = await Promise.race([client.health(controller.signal), timeout]);
       if (!ticket.isCurrent()) return;
       setHealth(healthSummary(report, false));
       setHealthReport(report);
       setHealthError('');
     } catch (error) {
-      if (isAbortError(error) || !ticket.isCurrent()) return;
+      if ((isAbortError(error) && !timedOut) || !ticket.isCurrent()) return;
       setHealth(healthSummary(null, true));
       setHealthError('Processing status unavailable. Previous status may be stale.');
     } finally {
+      window.clearTimeout(deadline);
+      ticket.signal.removeEventListener('abort', cancel);
       if (ticket.isCurrent()) setHealthLoading(false);
     }
   }, [client, gate]);

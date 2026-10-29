@@ -553,3 +553,13 @@ Recovery completed: 415 of 415 preserved originals recovered, zero unresolved; a
 authentication, playback and launch-setting checks passed. All 987 recordings were
 complete at readback, including 77 new arrivals; none needed attention or retry.
 Topic analysis still requires interactive Pi xAI sign-in.
+
+# October 29, 2026 — verification and bounded health requests
+
+Fresh runtime, preservation, audio/authentication, index and desktop/320/390 checks
+passed. All 415 recovered originals remain intact. A hanging health request could
+leave a previous status visible; a ten-second deadline now aborts it, marks status
+unavailable, preserves the last good snapshot and ignores late responses. Its
+regression failed before repair and passes afterward. Full backend: 436 tests;
+frontend: 86 tests, typecheck, lint and production build pass. See
+`docs/reviews/2026-10-29-recovery-reader-audit.md` for evidence and remaining work.

@@ -2,7 +2,7 @@
 
 The two releases and all 415 backlog recoveries are verified. Topic authentication
 is still blocked by Pi xAI `invalid_state`. This audit also found a health-request
-timeout gap, now repaired in source, and a separate phone capture coverage concern.
+timeout gap, now repaired and deployed, and a separate phone capture coverage concern.
 
 ## Requirement checks
 
@@ -75,3 +75,29 @@ No physical connectivity/quiet-upload/enrollment experiment was run.
 
 Private fresh evidence and screenshots are under
 `/Users/jonbennett/Library/Application Support/LifeRecorder-Review-20261029`.
+
+## Verified deployment follow-up
+
+Deployed immutable revision `565d6787419b4f3f640a8789fdeba6dab9b1c11c`
+through the existing launch job; source manifest SHA-256
+`4a0560db8936097f8a27a3ce674fb66659358e430439b9e1253f402fd75dcf99`
+verifies. All 36 receiver Python files are byte-identical to the prior deployed
+cache repair; this rollout changes the viewer health deadline. The engine remains
+ready and all 1,057 recordings are complete, with zero pending, retrying or needing
+attention. Topic authentication remains unavailable pending interactive Pi login.
+
+Post-deployment checks preserve all 1,057 transcripts completed before this rollout,
+index bodies/event IDs, cursor identity and pins. The original preservation audit
+also passes (495 earlier transcripts and 415 original/preservation audio hashes).
+Authenticated audio HEAD/range, unauthenticated denial, day/global counters,
+storage accounting, legacy viewer, TLS certificate pin and upload authentication
+pass. The same receiver PID owns `*:8766` and `127.0.0.1:8767`; unrelated launch
+settings are preserved. No new stderr bytes, tracebacks or systemic processing
+errors appeared between the pre-deploy offset and readback.
+
+The browser loaded the new `index-1EZDDTij.js` asset. Desktop, 320px and 390px
+checks show Play conversation and Sources with no horizontal overflow. The
+never-settling/late-reply timeout scenario is covered by the new regression;
+production requests were not artificially stalled. No private audio was played
+aloud during this review. Private receipts include `live-readback.json`,
+`preservation.json` and `post-deploy-continuity.json` in the evidence directory.

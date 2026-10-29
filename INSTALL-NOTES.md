@@ -563,3 +563,12 @@ unavailable, preserves the last good snapshot and ignores late responses. Its
 regression failed before repair and passes afterward. Full backend: 436 tests;
 frontend: 86 tests, typecheck, lint and production build pass. See
 `docs/reviews/2026-10-29-recovery-reader-audit.md` for evidence and remaining work.
+
+Deployed and read back immutable revision
+`565d6787419b4f3f640a8789fdeba6dab9b1c11c`; source manifest
+`4a0560db8936097f8a27a3ce674fb66659358e430439b9e1253f402fd75dcf99`
+verified. All 1,057 completed transcripts, indexes, cursor identity and pins
+survived deployment; all 415 recovered source hashes still match. Live
+upload/playback/authentication and desktop/320/390 reader checks pass. No new
+processing errors observed. Phone capture coverage and Pi login remain the
+separate unresolved items detailed in the audit.
